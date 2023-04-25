@@ -1,0 +1,23 @@
+arch=arm
+baudrate=115200
+board=stih418-b2264
+board_name=stih418-b2264
+bootdelay=2
+cpu=armv7
+vendor=st
+
+bootcmd=run boot_mmc
+load_env=env import -t 0x98000000 $filesize
+
+boot_mmc=echo Looking for FAT uenv.txt on sdcard;if mmc rescan && fatload mmc 0:1 0x98000000 uenv.txt; then run load_env; boot; echo *** Boot from FAT MMC failed... ***; fi ; echo Looking for EXT2 uenv.txt on sdcard; if mmc rescan && ext2load mmc 0:2 0x98000000 uenv.txt; then run load_env; boot ; echo *** Boot from EXT2 MMC failed... ***; fi
+
+boot_usb=usb start && fatload usb 0:1 0x98000000 uboot_payload.fit && run tweak_dtb_and_go
+
+fdt_high=0xffffffff
+initrd_high=0xffffffff
+
+stderr=serial
+stdin=serial
+stdout=serial
+
+tweak_dtb_and_go=test -n $dwc3_host && bootm start 0x98000000 && bootm loados && bootm ramdisk && bootm fdt && fdt set /soc/dwc3@8f94000/usb@9900000/ dr_mode host && echo *** Force DWC3 as HOST *** && bootm prep && bootm go; bootm 0x98000000

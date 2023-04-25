@@ -1,0 +1,2146 @@
+From dbdf4d0e31437b025df6c6bf4ab6ed3354fb1aec Mon Sep 17 00:00:00 2001
+From: Alain Volmat <avolmat@me.com>
+Date: Mon, 25 Dec 2023 15:57:16 +0000
+Subject: [PATCH 01/20] arm: dts: sti: add fake uart1 input clock
+
+Flexgen driver isn't yet available in u-boot so set a fixed-clock
+as input of the uart1 serial node so that the driver can retrieve
+the input clock instead of having the value hardcoded within the
+driver.
+
+Signed-off-by: Alain Volmat <avolmat@me.com>
+---
+ arch/arm/dts/stih410-b2260-u-boot.dtsi | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/arch/arm/dts/stih410-b2260-u-boot.dtsi b/arch/arm/dts/stih410-b2260-u-boot.dtsi
+index e9d7ec92281..9eeab2b87ec 100644
+--- a/arch/arm/dts/stih410-b2260-u-boot.dtsi
++++ b/arch/arm/dts/stih410-b2260-u-boot.dtsi
+@@ -6,6 +6,12 @@
+  */
+ 
+ /{
++	clk_uart1: clk-uart1 {
++		#clock-cells = <0>;
++		compatible = "fixed-clock";
++		clock-frequency = <200000000>;
++	};
++
+ 	soc {
+ 		st_dwc3: dwc3@8f94000 {
+ 			dwc3: dwc3@9900000 {
+@@ -14,6 +20,10 @@
+ 			};
+ 		};
+ 
++		uart1: serial@9831000 {
++			clocks = <&clk_uart1>;
++		};
++
+ 		clk_usb: clk-usb {
+ 			compatible = "fixed-clock";
+ 			#clock-cells = <0>;
+-- 
+2.43.0
+
+From 4a133fa0aadaf2a3fd3072711565d07388408a8e Mon Sep 17 00:00:00 2001
+From: Alain Volmat <avolmat@me.com>
+Date: Tue, 15 Aug 2023 21:02:27 +0000
+Subject: [PATCH 02/20] serial: sti_asc: get clock_rate from device tree
+
+Retrieve the clock rate from the device-tree instead of
+having the value hardcoded within the driver.
+
+Signed-off-by: Alain Volmat <avolmat@me.com>
+---
+ drivers/serial/serial_sti_asc.c | 40 ++++++++++++++++++++++++---------
+ 1 file changed, 29 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/serial/serial_sti_asc.c b/drivers/serial/serial_sti_asc.c
+index ef68e585dd6..9ab51899de6 100644
+--- a/drivers/serial/serial_sti_asc.c
++++ b/drivers/serial/serial_sti_asc.c
+@@ -6,6 +6,7 @@
+  * Author(s): Patrice Chotard, <patrice.chotard@foss.st.com> for STMicroelectronics.
+  */
+ 
++#include <clk.h>
+ #include <dm.h>
+ #include <log.h>
+ #include <serial.h>
+@@ -42,12 +43,13 @@ struct sti_asc_uart {
+ struct sti_asc_serial {
+ 	/* address of registers in physical memory */
+ 	struct sti_asc_uart *regs;
++	/* clock rate of the IP */
++	u32 clock_rate;
+ };
+ 
+ /* Values for the BAUDRATE Register */
+-#define PCLK			(200ul * 1000000ul)
+-#define BAUDRATE_VAL_M0(bps)	(PCLK / (16 * (bps)))
+-#define BAUDRATE_VAL_M1(bps)	((bps * (1 << 14)) + (1<<13)) / (PCLK/(1 << 6))
++#define BAUDRATE_VAL_M0(pclk, bps)	((pclk) / (16 * (bps)))
++#define BAUDRATE_VAL_M1(pclk, bps)	((bps * (1 << 14)) + (1<<13)) / ((pclk)/(1 << 6))
+ 
+ /*
+  * MODE 0
+@@ -79,30 +81,31 @@ static int sti_asc_pending(struct udevice *dev, bool input)
+ 		return status & STA_TF;
+ }
+ 
+-static int _sti_asc_serial_setbrg(struct sti_asc_uart *uart, int baudrate)
++static int _sti_asc_serial_setbrg(struct sti_asc_serial *priv, int baudrate)
+ {
++	struct sti_asc_uart *const uart = priv->regs;
+ 	unsigned long val;
+ 	int t, mode = 1;
+ 
+ 	switch (baudrate) {
+ 	case 9600:
+-		t = BAUDRATE_VAL_M0(9600);
++		t = BAUDRATE_VAL_M0(priv->clock_rate, 9600);
+ 		mode = 0;
+ 		break;
+ 	case 19200:
+-		t = BAUDRATE_VAL_M1(19200);
++		t = BAUDRATE_VAL_M1(priv->clock_rate, 19200);
+ 		break;
+ 	case 38400:
+-		t = BAUDRATE_VAL_M1(38400);
++		t = BAUDRATE_VAL_M1(priv->clock_rate, 38400);
+ 		break;
+ 	case 57600:
+-		t = BAUDRATE_VAL_M1(57600);
++		t = BAUDRATE_VAL_M1(priv->clock_rate, 57600);
+ 		break;
+ 	default:
+ 		debug("ASC: unsupported baud rate: %d, using 115200 instead.\n",
+ 		      baudrate);
+ 	case 115200:
+-		t = BAUDRATE_VAL_M1(115200);
++		t = BAUDRATE_VAL_M1(priv->clock_rate, 115200);
+ 		break;
+ 	}
+ 
+@@ -130,9 +133,8 @@ static int _sti_asc_serial_setbrg(struct sti_asc_uart *uart, int baudrate)
+ static int sti_asc_serial_setbrg(struct udevice *dev, int baudrate)
+ {
+ 	struct sti_asc_serial *priv = dev_get_priv(dev);
+-	struct sti_asc_uart *const uart = priv->regs;
+ 
+-	return _sti_asc_serial_setbrg(uart, baudrate);
++	return _sti_asc_serial_setbrg(priv, baudrate);
+ }
+ 
+ /* blocking function, that returns next char */
+@@ -170,11 +172,27 @@ static int sti_asc_serial_probe(struct udevice *dev)
+ 	struct sti_asc_serial *priv = dev_get_priv(dev);
+ 	unsigned long val;
+ 	fdt_addr_t base;
++	struct clk clk;
++	int ret;
+ 
+ 	base = dev_read_addr(dev);
+ 	if (base == FDT_ADDR_T_NONE)
+ 		return -EINVAL;
+ 
++	ret = clk_get_by_index(dev, 0, &clk);
++	if (ret < 0)
++		return ret;
++
++	ret = clk_enable(&clk);
++	if (ret)
++		return ret;
++
++	priv->clock_rate = clk_get_rate(&clk);
++	if (!priv->clock_rate) {
++		clk_disable(&clk);
++		return -EINVAL;
++	};
++
+ 	priv->regs = (struct sti_asc_uart *)base;
+ 	sti_asc_serial_setbrg(dev, gd->baudrate);
+ 
+-- 
+2.43.0
+
+From 9282b1bb2dff6047419fa9ed708287cc6db47fd0 Mon Sep 17 00:00:00 2001
+From: Alain Volmat <avolmat@me.com>
+Date: Tue, 15 Aug 2023 20:53:45 +0000
+Subject: [PATCH 03/20] ARM: dts: sti: add stih418 related device-tree files
+
+Add stih418 related device-tree files from linux v6.6
+code.
+
+Signed-off-by: Alain Volmat <avolmat@me.com>
+---
+ arch/arm/dts/stih418-clock.dtsi          | 215 +++++++++++++++++++++++
+ arch/arm/dts/stih418.dtsi                | 118 +++++++++++++
+ include/dt-bindings/clock/stih418-clks.h |  35 ++++
+ 3 files changed, 368 insertions(+)
+ create mode 100644 arch/arm/dts/stih418-clock.dtsi
+ create mode 100644 arch/arm/dts/stih418.dtsi
+ create mode 100644 include/dt-bindings/clock/stih418-clks.h
+
+diff --git a/arch/arm/dts/stih418-clock.dtsi b/arch/arm/dts/stih418-clock.dtsi
+new file mode 100644
+index 00000000000..e1749e92a2e
+--- /dev/null
++++ b/arch/arm/dts/stih418-clock.dtsi
+@@ -0,0 +1,215 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (C) 2015 STMicroelectronics R&D Limited
++ */
++#include <dt-bindings/clock/stih418-clks.h>
++/ {
++	/*
++	 * Fixed 30MHz oscillator inputs to SoC
++	 */
++	clk_sysin: clk-sysin {
++		#clock-cells = <0>;
++		compatible = "fixed-clock";
++		clock-frequency = <30000000>;
++		clock-output-names = "CLK_SYSIN";
++	};
++
++	clk_tmdsout_hdmi: clk-tmdsout-hdmi {
++		#clock-cells = <0>;
++		compatible = "fixed-clock";
++		clock-frequency = <0>;
++	};
++
++	clocks {
++		#address-cells = <1>;
++		#size-cells = <1>;
++		ranges;
++
++		compatible = "st,stih418-clk", "simple-bus";
++
++		/*
++		 * A9 PLL.
++		 */
++		clockgen-a9@92b0000 {
++			compatible = "st,clkgen-c32";
++			reg = <0x92b0000 0x10000>;
++
++			clockgen_a9_pll: clockgen-a9-pll {
++				#clock-cells = <1>;
++				compatible = "st,stih418-clkgen-plla9";
++
++				clocks = <&clk_sysin>;
++			};
++
++			/*
++			 * ARM CPU related clocks.
++			 */
++			clk_m_a9: clk-m-a9 {
++				#clock-cells = <0>;
++				compatible = "st,stih407-clkgen-a9-mux", "st,clkgen-mux";
++
++				clocks = <&clockgen_a9_pll 0>,
++					 <&clockgen_a9_pll 0>,
++					 <&clk_s_c0_flexgen 13>,
++					 <&clk_m_a9_ext2f_div2>;
++
++				/*
++				 * ARM Peripheral clock for timers
++				 */
++				arm_periph_clk: clk-m-a9-periphs {
++					#clock-cells = <0>;
++					compatible = "fixed-factor-clock";
++					clocks = <&clk_m_a9>;
++					clock-div = <2>;
++					clock-mult = <1>;
++				};
++			};
++		};
++
++		clockgen-a@90ff000 {
++			compatible = "st,clkgen-c32";
++			reg = <0x90ff000 0x1000>;
++
++			clk_s_a0_pll: clk-s-a0-pll {
++				#clock-cells = <1>;
++				compatible = "st,clkgen-pll0-a0";
++
++				clocks = <&clk_sysin>;
++			};
++
++			clk_s_a0_flexgen: clk-s-a0-flexgen {
++				compatible = "st,flexgen", "st,flexgen-stih410-a0";
++
++				#clock-cells = <1>;
++
++				clocks = <&clk_s_a0_pll 0>,
++					 <&clk_sysin>;
++			};
++		};
++
++		clk_s_c0: clockgen-c@9103000 {
++			compatible = "st,clkgen-c32";
++			reg = <0x9103000 0x1000>;
++
++			clk_s_c0_pll0: clk-s-c0-pll0 {
++				#clock-cells = <1>;
++				compatible = "st,clkgen-pll0-c0";
++
++				clocks = <&clk_sysin>;
++			};
++
++			clk_s_c0_pll1: clk-s-c0-pll1 {
++				#clock-cells = <1>;
++				compatible = "st,clkgen-pll1-c0";
++
++				clocks = <&clk_sysin>;
++			};
++
++			clk_s_c0_quadfs: clk-s-c0-quadfs {
++				#clock-cells = <1>;
++				compatible = "st,quadfs-pll";
++
++				clocks = <&clk_sysin>;
++			};
++
++			clk_s_c0_flexgen: clk-s-c0-flexgen {
++				#clock-cells = <1>;
++				compatible = "st,flexgen", "st,flexgen-stih418-c0";
++
++				clocks = <&clk_s_c0_pll0 0>,
++					 <&clk_s_c0_pll1 0>,
++					 <&clk_s_c0_quadfs 0>,
++					 <&clk_s_c0_quadfs 1>,
++					 <&clk_s_c0_quadfs 2>,
++					 <&clk_s_c0_quadfs 3>,
++					 <&clk_sysin>;
++
++				/*
++				 * ARM Peripheral clock for timers
++				 */
++				clk_m_a9_ext2f_div2: clk-m-a9-ext2f-div2s {
++					#clock-cells = <0>;
++					compatible = "fixed-factor-clock";
++
++					clocks = <&clk_s_c0_flexgen 13>;
++
++					clock-output-names = "clk-m-a9-ext2f-div2";
++
++					clock-div = <2>;
++					clock-mult = <1>;
++				};
++			};
++		};
++
++		clockgen-d0@9104000 {
++			compatible = "st,clkgen-c32";
++			reg = <0x9104000 0x1000>;
++
++			clk_s_d0_quadfs: clk-s-d0-quadfs {
++				#clock-cells = <1>;
++				compatible = "st,quadfs-d0";
++
++				clocks = <&clk_sysin>;
++			};
++
++			clk_s_d0_flexgen: clk-s-d0-flexgen {
++				#clock-cells = <1>;
++				compatible = "st,flexgen", "st,flexgen-stih410-d0";
++
++				clocks = <&clk_s_d0_quadfs 0>,
++					 <&clk_s_d0_quadfs 1>,
++					 <&clk_s_d0_quadfs 2>,
++					 <&clk_s_d0_quadfs 3>,
++					 <&clk_sysin>;
++			};
++		};
++
++		clockgen-d2@9106000 {
++			compatible = "st,clkgen-c32";
++			reg = <0x9106000 0x1000>;
++
++			clk_s_d2_quadfs: clk-s-d2-quadfs {
++				#clock-cells = <1>;
++				compatible = "st,quadfs-d2";
++
++				clocks = <&clk_sysin>;
++			};
++
++			clk_s_d2_flexgen: clk-s-d2-flexgen {
++				#clock-cells = <1>;
++				compatible = "st,flexgen", "st,flexgen-stih418-d2";
++
++				clocks = <&clk_s_d2_quadfs 0>,
++					 <&clk_s_d2_quadfs 1>,
++					 <&clk_s_d2_quadfs 2>,
++					 <&clk_s_d2_quadfs 3>,
++					 <&clk_sysin>,
++					 <&clk_sysin>,
++					 <&clk_tmdsout_hdmi>;
++			};
++		};
++
++		clockgen-d3@9107000 {
++			compatible = "st,clkgen-c32";
++			reg = <0x9107000 0x1000>;
++
++			clk_s_d3_quadfs: clk-s-d3-quadfs {
++				#clock-cells = <1>;
++				compatible = "st,quadfs-d3";
++
++				clocks = <&clk_sysin>;
++			};
++
++			clk_s_d3_flexgen: clk-s-d3-flexgen {
++				#clock-cells = <1>;
++				compatible = "st,flexgen", "st,flexgen-stih407-d3";
++
++				clocks = <&clk_s_d3_quadfs 0>,
++					 <&clk_s_d3_quadfs 1>,
++					 <&clk_s_d3_quadfs 2>,
++					 <&clk_s_d3_quadfs 3>,
++					 <&clk_sysin>;
++			};
++		};
++	};
++};
+diff --git a/arch/arm/dts/stih418.dtsi b/arch/arm/dts/stih418.dtsi
+new file mode 100644
+index 00000000000..b35b9b7a7cc
+--- /dev/null
++++ b/arch/arm/dts/stih418.dtsi
+@@ -0,0 +1,118 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (C) 2014 STMicroelectronics Limited.
++ * Author: Peter Griffin <peter.griffin@linaro.org>
++ */
++#include "stih418-clock.dtsi"
++#include "stih407-family.dtsi"
++#include "stih410-pinctrl.dtsi"
++/ {
++	cpus {
++		#address-cells = <1>;
++		#size-cells = <0>;
++		cpu@2 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a9";
++			reg = <2>;
++			/* u-boot puts hpen in SBC dmem at 0xa4 offset */
++			cpu-release-addr = <0x94100A4>;
++		};
++		cpu@3 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a9";
++			reg = <3>;
++			/* u-boot puts hpen in SBC dmem at 0xa4 offset */
++			cpu-release-addr = <0x94100A4>;
++		};
++	};
++
++	usb2_picophy1: phy2 {
++		compatible = "st,stih407-usb2-phy";
++		#phy-cells = <0>;
++		st,syscfg = <&syscfg_core 0xf8 0xf4>;
++		resets = <&softreset STIH407_PICOPHY_SOFTRESET>,
++			 <&picophyreset STIH407_PICOPHY0_RESET>;
++		reset-names = "global", "port";
++	};
++
++	usb2_picophy2: phy3 {
++		compatible = "st,stih407-usb2-phy";
++		#phy-cells = <0>;
++		st,syscfg = <&syscfg_core 0xfc 0xf4>;
++		resets = <&softreset STIH407_PICOPHY_SOFTRESET>,
++			 <&picophyreset STIH407_PICOPHY1_RESET>;
++		reset-names = "global", "port";
++	};
++
++	soc {
++		rng11: rng@8a8a000 {
++			status = "disabled";
++		};
++
++		ohci0: usb@9a03c00 {
++			compatible = "st,st-ohci-300x";
++			reg = <0x9a03c00 0x100>;
++			interrupts = <GIC_SPI 180 IRQ_TYPE_LEVEL_HIGH>;
++			clocks = <&clk_s_c0_flexgen CLK_TX_ICN_DISP_0>;
++			resets = <&powerdown STIH407_USB2_PORT0_POWERDOWN>,
++				 <&softreset STIH407_USB2_PORT0_SOFTRESET>;
++			reset-names = "power", "softreset";
++			phys = <&usb2_picophy1>;
++			phy-names = "usb";
++		};
++
++		ehci0: usb@9a03e00 {
++			compatible = "st,st-ehci-300x";
++			reg = <0x9a03e00 0x100>;
++			interrupts = <GIC_SPI 151 IRQ_TYPE_LEVEL_HIGH>;
++			pinctrl-names = "default";
++			pinctrl-0 = <&pinctrl_usb0>;
++			clocks = <&clk_s_c0_flexgen CLK_TX_ICN_DISP_0>;
++			resets = <&powerdown STIH407_USB2_PORT0_POWERDOWN>,
++				 <&softreset STIH407_USB2_PORT0_SOFTRESET>;
++			reset-names = "power", "softreset";
++			phys = <&usb2_picophy1>;
++			phy-names = "usb";
++		};
++
++		ohci1: usb@9a83c00 {
++			compatible = "st,st-ohci-300x";
++			reg = <0x9a83c00 0x100>;
++			interrupts = <GIC_SPI 181 IRQ_TYPE_LEVEL_HIGH>;
++			clocks = <&clk_s_c0_flexgen CLK_TX_ICN_DISP_0>;
++			resets = <&powerdown STIH407_USB2_PORT1_POWERDOWN>,
++				 <&softreset STIH407_USB2_PORT1_SOFTRESET>;
++			reset-names = "power", "softreset";
++			phys = <&usb2_picophy2>;
++			phy-names = "usb";
++		};
++
++		ehci1: usb@9a83e00 {
++			compatible = "st,st-ehci-300x";
++			reg = <0x9a83e00 0x100>;
++			interrupts = <GIC_SPI 153 IRQ_TYPE_LEVEL_HIGH>;
++			pinctrl-names = "default";
++			pinctrl-0 = <&pinctrl_usb1>;
++			clocks = <&clk_s_c0_flexgen CLK_TX_ICN_DISP_0>;
++			resets = <&powerdown STIH407_USB2_PORT1_POWERDOWN>,
++				 <&softreset STIH407_USB2_PORT1_SOFTRESET>;
++			reset-names = "power", "softreset";
++			phys = <&usb2_picophy2>;
++			phy-names = "usb";
++		};
++
++		mmc0: sdhci@9060000 {
++			assigned-clocks = <&clk_s_c0_flexgen CLK_MMC_0>;
++			assigned-clock-parents = <&clk_s_c0_pll1 0>;
++			assigned-clock-rates = <200000000>;
++		};
++
++		thermal@91a0000 {
++			compatible = "st,stih407-thermal";
++			reg = <0x91a0000 0x28>;
++			clock-names = "thermal";
++			clocks = <&clk_sysin>;
++			interrupts = <GIC_SPI 205 IRQ_TYPE_EDGE_RISING>;
++		};
++	};
++};
+diff --git a/include/dt-bindings/clock/stih418-clks.h b/include/dt-bindings/clock/stih418-clks.h
+new file mode 100644
+index 00000000000..0e7fba0c52b
+--- /dev/null
++++ b/include/dt-bindings/clock/stih418-clks.h
+@@ -0,0 +1,35 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * This header provides constants clk index STMicroelectronics
++ * STiH418 SoC.
++ */
++#ifndef _DT_BINDINGS_CLK_STIH418
++#define _DT_BINDINGS_CLK_STIH418
++
++#include "stih410-clks.h"
++
++/* STiH418 introduces new clock outputs compared to STiH410 */
++
++/* CLOCKGEN C0 */
++#define CLK_PROC_BDISP_0        14
++#define CLK_PROC_BDISP_1        15
++#define CLK_TX_ICN_1            23
++#define CLK_ETH_PHYREF          27
++#define CLK_PP_HEVC             35
++#define CLK_CLUST_HEVC          36
++#define CLK_HWPE_HEVC           37
++#define CLK_FC_HEVC             38
++#define CLK_PROC_MIXER		39
++#define CLK_PROC_SC		40
++#define CLK_AVSP_HEVC		41
++
++/* CLOCKGEN D2 */
++#undef CLK_PIX_PIP
++#undef CLK_PIX_GDP1
++#undef CLK_PIX_GDP2
++#undef CLK_PIX_GDP3
++#undef CLK_PIX_GDP4
++
++#define CLK_TMDS_HDMI_DIV2	5
++#define CLK_VP9			47
++#endif
+-- 
+2.43.0
+
+From 1c1bcff4997e532eadbd6daed1876fa6c3e65972 Mon Sep 17 00:00:00 2001
+From: Alain Volmat <avolmat@me.com>
+Date: Tue, 23 Jan 2024 19:54:30 +0000
+Subject: [PATCH 04/20] ARM: mach-sti: add CONFIG SPL to enable SPL build
+
+Add the config SPL listing necessary configurations
+for SPL build on STi platform.
+
+Signed-off-by: Alain Volmat <avolmat@me.com>
+---
+ arch/arm/mach-sti/Kconfig | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/arch/arm/mach-sti/Kconfig b/arch/arm/mach-sti/Kconfig
+index d9e264024c8..ebc9192b1f6 100644
+--- a/arch/arm/mach-sti/Kconfig
++++ b/arch/arm/mach-sti/Kconfig
+@@ -1,5 +1,29 @@
+ if ARCH_STI
+ 
++config SPL
++	select SPL_BOARD_INIT
++	select SPL_CLK
++	select SPL_DM
++	select SPL_DM_SEQ_ALIAS
++	select SPL_DRIVERS_MISC
++	select SPL_FRAMEWORK
++	select SPL_GPIO
++	select SPL_LIBCOMMON_SUPPORT
++	select SPL_LIBGENERIC_SUPPORT
++	select SPL_OF_CONTROL
++	select SPL_OF_TRANSLATE
++	select SPL_PINCTRL
++	select SPL_REGMAP
++#	select SPL_DM_RESET
++	select SPL_SERIAL
++	select SPL_SYSCON
++	select SPL_WATCHDOG if WATCHDOG
++	imply BOOTSTAGE_STASH if SPL_BOOTSTAGE
++	imply SPL_BOOTSTAGE if BOOTSTAGE
++	imply SPL_DISPLAY_PRINT
++	imply SPL_LIBDISK_SUPPORT
++	imply SPL_SPI_LOAD if SPL_SPI
++
+ config SYS_SOC
+ 	default "stih410"
+ 
+-- 
+2.43.0
+
+From 24bb83f73e9cff6ccdc800ca8db969dc1419873b Mon Sep 17 00:00:00 2001
+From: Alain Volmat <avolmat@me.com>
+Date: Mon, 25 Dec 2023 13:28:47 +0000
+Subject: [PATCH 05/20] board: st: add stih418-b2264 board entry
+
+Add the board entry for the B2264 (4KOpen board).
+
+Signed-off-by: Alain Volmat <avolmat@me.com>
+---
+ arch/arm/mach-sti/Kconfig             |  11 +-
+ board/st/stih418-b2264/Kconfig        |  26 ++++
+ board/st/stih418-b2264/MAINTAINERS    |   7 +
+ board/st/stih418-b2264/Makefile       |   5 +
+ board/st/stih418-b2264/board.c        | 199 ++++++++++++++++++++++++++
+ board/st/stih418-b2264/btfmw_param.h  |  82 +++++++++++
+ board/st/stih418-b2264/config.mk      |  15 ++
+ board/st/stih418-b2264/u-boot-spl.lds |  97 +++++++++++++
+ include/configs/stih418-b2264.h       |  61 ++++++++
+ 9 files changed, 502 insertions(+), 1 deletion(-)
+ create mode 100644 board/st/stih418-b2264/Kconfig
+ create mode 100644 board/st/stih418-b2264/MAINTAINERS
+ create mode 100644 board/st/stih418-b2264/Makefile
+ create mode 100644 board/st/stih418-b2264/board.c
+ create mode 100644 board/st/stih418-b2264/btfmw_param.h
+ create mode 100644 board/st/stih418-b2264/config.mk
+ create mode 100644 board/st/stih418-b2264/u-boot-spl.lds
+ create mode 100644 include/configs/stih418-b2264.h
+
+diff --git a/arch/arm/mach-sti/Kconfig b/arch/arm/mach-sti/Kconfig
+index ebc9192b1f6..0b5e1651008 100644
+--- a/arch/arm/mach-sti/Kconfig
++++ b/arch/arm/mach-sti/Kconfig
+@@ -28,7 +28,7 @@ config SYS_SOC
+ 	default "stih410"
+ 
+ choice
+-	prompt "STiH410 board select"
++	prompt "STiH41x board select"
+ 
+ config TARGET_STIH410_B2260
+ 	bool "96Boards STiH410-B2260"
+@@ -48,8 +48,17 @@ config TARGET_STIH410_B2260
+ 	  - High speed connector (SD/I2C/USB interfaces)
+ 	  - Low speed connector (UART/I2C/GPIO/SPI/PCM interfaces)
+ 
++config TARGET_STIH418_B2264
++	bool "4KOpen STiH418-B2264"
++	select SUPPORT_SPL
++	select SPL
++	help
++	  Support for 4KOpen STiH418-B2264 based on STMicroelectronics
++	  STiH418 soc.
++
+ endchoice
+ 
+ source "board/st/stih410-b2260/Kconfig"
++source "board/st/stih418-b2264/Kconfig"
+ 
+ endif
+diff --git a/board/st/stih418-b2264/Kconfig b/board/st/stih418-b2264/Kconfig
+new file mode 100644
+index 00000000000..163d52dd470
+--- /dev/null
++++ b/board/st/stih418-b2264/Kconfig
+@@ -0,0 +1,26 @@
++if TARGET_STIH418_B2264
++
++config SYS_BOARD
++	string
++	default "stih418-b2264"
++
++config SYS_VENDOR
++	string
++	default "st"
++
++config SYS_SOC
++	string
++	default "stih418"
++
++config SYS_CONFIG_NAME
++	string
++	default "stih418-b2264"
++
++config TARGET_STIH418_B2264_LIBBTFMW_PATH
++	string "Path to the libbtfmw.a file"
++	help
++	  U-boot SPL for STiH418-B2264 requires to be linked with the
++	  libbtfmw.a library which provide early platform initialize
++	  code.
++
++endif
+diff --git a/board/st/stih418-b2264/MAINTAINERS b/board/st/stih418-b2264/MAINTAINERS
+new file mode 100644
+index 00000000000..cd80c68c544
+--- /dev/null
++++ b/board/st/stih418-b2264/MAINTAINERS
+@@ -0,0 +1,7 @@
++STIH418-B2264 BOARD
++M:	Alain Volmat <avolmat@me.com>
++S:	Maintained
++F:	board/st/stih418-b2264/
++F:	include/configs/stih418-b2264.h
++F:	configs/stih418-b2264_defconfig
++F:	arch/arm/dts/stih418*
+diff --git a/board/st/stih418-b2264/Makefile b/board/st/stih418-b2264/Makefile
+new file mode 100644
+index 00000000000..25c47fed443
+--- /dev/null
++++ b/board/st/stih418-b2264/Makefile
+@@ -0,0 +1,5 @@
++# SPDX-License-Identifier: GPL-2.0+
++#
++# Author: Alain VOLMAT <avolmat@me.com>
++
++obj-y	= board.o
+diff --git a/board/st/stih418-b2264/board.c b/board/st/stih418-b2264/board.c
+new file mode 100644
+index 00000000000..24011ad3c99
+--- /dev/null
++++ b/board/st/stih418-b2264/board.c
+@@ -0,0 +1,199 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Author: Alain VOLMAT <avolmat@me.com>
++ * Originaly based on board.c of stih410-b2260
++ */
++
++#include <common.h>
++#include <cpu_func.h>
++#include <init.h>
++#include <asm/cache.h>
++#include <asm/global_data.h>
++#include <asm/io.h>
++#include <asm/spl.h>
++#include <linux/usb/otg.h>
++#include <dwc3-sti-glue.h>
++#include <dwc3-uboot.h>
++#include <usb.h>
++
++#ifdef CONFIG_SPL_BUILD
++#include <spl.h>
++#include "btfmw_param.h"
++#endif
++
++DECLARE_GLOBAL_DATA_PTR;
++
++#ifndef CONFIG_SPL_BUILD
++int dram_init(void)
++{
++	gd->ram_size = PHYS_SDRAM_1_SIZE;
++	return 0;
++}
++
++int dram_init_banksize(void)
++{
++	gd->bd->bi_dram[0].start = PHYS_SDRAM_1;
++	gd->bd->bi_dram[0].size = PHYS_SDRAM_1_SIZE;
++
++	return 0;
++}
++#endif
++
++#if !CONFIG_IS_ENABLED(SYS_DCACHE_OFF)
++void enable_caches(void)
++{
++	/* Enable D-cache. I-cache is already enabled in start.S */
++	dcache_enable();
++}
++#endif
++
++int board_init(void)
++{
++	/*
++	 * FIXME: MMC0 instance requires its flexgen clock to be
++	 * enabled and connected to its correct parent.  Currently
++	 * flexgen clock driver is not available hence DT properties
++	 * related to clock cannot be handled.  To overcome that,
++	 * perform the initialization manually and in an hardcoded
++	 * manner here.
++	 */
++	/* Select MMC0 parent clock and enable it */
++	writel(0x41414240, 0x9103020);
++	writel(0x57, 0x910318c);
++
++	return 0;
++}
++
++#ifdef CONFIG_USB_DWC3
++static struct dwc3_device dwc3_device_data = {
++	.maximum_speed = USB_SPEED_HIGH,
++	.dr_mode = USB_DR_MODE_PERIPHERAL,
++	.index = 0,
++};
++
++int dm_usb_gadget_handle_interrupts(struct udevice *dev)
++{
++	dwc3_uboot_handle_interrupt(dev);
++	return 0;
++}
++
++int board_usb_init(int index, enum usb_init_type init)
++{
++	int node;
++	const void *blob = gd->fdt_blob;
++
++	/* find the snps,dwc3 node */
++	node = fdt_node_offset_by_compatible(blob, -1, "snps,dwc3");
++
++	dwc3_device_data.base = fdtdec_get_addr(blob, node, "reg");
++
++	return dwc3_uboot_init(&dwc3_device_data);
++}
++
++int board_usb_cleanup(int index, enum usb_init_type init)
++{
++	dwc3_uboot_exit(index);
++	return 0;
++}
++
++int g_dnl_board_usb_cable_connected(void)
++{
++	return 1;
++}
++#endif
++
++#ifdef CONFIG_SPL_BUILD
++/* Return the id of the core currently running */
++static inline unsigned long read_mpidr(void)
++{
++	unsigned long val;
++
++	asm volatile ("mrc p15, 0, %0, c0, c0, 5" : "=r" (val));
++
++	return val;
++}
++
++/*
++ * Currently SMP is not supported and moreover only
++ * a single core must run in order to be able to
++ * properly execute the btfmw for platform preparation
++ *
++ * s_init function is being called very early the
++ * process of boot. Check for the coreid and "kill"
++ * any other core than the core0
++ *
++ * TODO: this code is temporary until SMP is properly
++ * handled
++ */
++void s_init(void)
++{
++	int val;
++
++	/*
++	 * Check core_id and only let Core0 proceed
++	 * TODO - to be reworked, wfi or wfe and allow other
++	 * cores to be waken-up, via psci ?
++	 */
++	val = read_mpidr();
++	if (val & 0xff)
++		while(1)
++			wfi();
++}
++
++/*
++ * board_init_f function is in charge of preparing the system
++ * so that SDRAM and UART are accessible
++ * btfmw_run takes care of that for us
++ *
++ * This function is based on board_init_f found in spl common
++ * code, with the btfmw_run call done at the beginning
++ *
++ * Upon this call SDRAM is accessible and thus SDRAM can be
++ * used
++ */
++extern int btfmw_run(void *param);
++void board_init_f(ulong dummy)
++{
++	int ret;
++
++	/* Execute the btfmw_run function to initialize the platform */
++	ret = btfmw_run(btfmw_params_b2264stxh418rev1_bin);
++	if (ret)
++		panic("Failed to execute brfmw_run\n");
++
++	ret = spl_early_init();
++	if (ret)
++		panic("spl_early_init() failed: %d\n", ret);
++
++	preloader_console_init();
++}
++
++void spl_board_init(void)
++{
++	/*
++	 * FIXME: MMC0 instance requires its flexgen clock to be
++	 * enabled and connected to its correct parent.  Currently
++	 * flexgen clock driver is not available hence DT properties
++	 * related to clock cannot be handled.  To overcome that,
++	 * perform the initialization manually and in an hardcoded
++	 * manner here.
++	 */
++	/* Select MMC0 parent clock and enable it */
++	writel(0x41414240, 0x9103020);
++	writel(0x57, 0x910318c);
++}
++
++void board_boot_order(u32 *spl_boot_list)
++{
++	int i = 0;
++#ifdef CONFIG_SPL_MMC
++	spl_boot_list[i++] = BOOT_DEVICE_MMC1;
++#endif
++	spl_boot_list[i++] = BOOT_DEVICE_UART;
++}
++
++/* Empty function to reset the SPL */
++void reset_cpu(void)
++{
++}
++#endif
+diff --git a/board/st/stih418-b2264/btfmw_param.h b/board/st/stih418-b2264/btfmw_param.h
+new file mode 100644
+index 00000000000..24f9721cd5f
+--- /dev/null
++++ b/board/st/stih418-b2264/btfmw_param.h
+@@ -0,0 +1,82 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Author: Alain VOLMAT <avolmat@me.com>
++ * Extract of the binary code from btfmw param file
++ */
++
++unsigned char btfmw_params_b2264stxh418rev1_bin[] = {
++  0x57, 0x46, 0x54, 0x42, 0x00, 0x00, 0x00, 0x00, 0x1b, 0x00, 0x00, 0x00,
++  0xee, 0x03, 0x08, 0x00, 0x62, 0x62, 0x62, 0x62, 0xee, 0x03, 0x08, 0x20,
++  0x62, 0x62, 0x62, 0x62, 0xee, 0x03, 0x08, 0x40, 0x62, 0x62, 0x62, 0x62,
++  0xee, 0x03, 0x08, 0x60, 0x62, 0x62, 0x62, 0x62, 0xee, 0x03, 0x00, 0x00,
++  0x53, 0x53, 0x53, 0x53, 0xee, 0x03, 0x00, 0x20, 0x5d, 0x67, 0x6c, 0x7b,
++  0xee, 0x03, 0x00, 0x40, 0x85, 0x8a, 0x8f, 0x94, 0xee, 0x03, 0x00, 0x60,
++  0x99, 0x9d, 0x9d, 0x9d, 0xee, 0x03, 0x01, 0x0f, 0x31, 0x31, 0x31, 0x31,
++  0xee, 0x03, 0x01, 0x2f, 0x3a, 0x44, 0x4e, 0x58, 0xee, 0x03, 0x01, 0x4f,
++  0x62, 0x6c, 0x71, 0x7b, 0xee, 0x03, 0x01, 0x6f, 0x85, 0x8f, 0x8f, 0x8f,
++  0xee, 0x03, 0x81, 0x07, 0xc5, 0xc5, 0xc5, 0xc5, 0xee, 0x03, 0x81, 0x27,
++  0xc5, 0xc5, 0xc5, 0xc5, 0xee, 0x03, 0x81, 0x47, 0xc5, 0xc5, 0xc5, 0xc5,
++  0xee, 0x03, 0x81, 0x67, 0xc5, 0xc5, 0xc5, 0xc5, 0xee, 0x03, 0x01, 0x0a,
++  0x7b, 0x7b, 0x7b, 0x7b, 0xee, 0x03, 0x01, 0x2a, 0x85, 0x8f, 0x99, 0xa2,
++  0xee, 0x03, 0x01, 0x4a, 0xac, 0xb6, 0xbb, 0xc0, 0xee, 0x03, 0x01, 0x6a,
++  0xc5, 0xc5, 0xc5, 0xc5, 0xf2, 0x03, 0x00, 0x00, 0x10, 0x00, 0x10, 0x00,
++  0xed, 0x03, 0x00, 0x00, 0x70, 0x11, 0x01, 0x00, 0xed, 0x03, 0x01, 0x00,
++  0x70, 0x11, 0x01, 0x00, 0xec, 0x03, 0x00, 0x00, 0x10, 0x03, 0x13, 0x05,
++  0xec, 0x03, 0x01, 0x00, 0x10, 0x03, 0x13, 0x05, 0xeb, 0x03, 0x00, 0x00,
++  0x00, 0x00, 0x00, 0x00, 0xeb, 0x03, 0x01, 0x00, 0x03, 0x00, 0x00, 0x00,
++  0x05, 0x00, 0x00, 0x00, 0xd1, 0x07, 0x04, 0x00, 0x80, 0xde, 0x89, 0x3f,
++  0xd1, 0x07, 0x05, 0x00, 0x40, 0xef, 0xc4, 0x1f, 0xd1, 0x07, 0x06, 0x00,
++  0x40, 0xef, 0xc4, 0x1f, 0xd1, 0x07, 0x01, 0x00, 0x00, 0x8c, 0x86, 0x47,
++  0xd4, 0x07, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00,
++  0x02, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
++  0x01, 0x00, 0x00, 0x00, 0x17, 0x00, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00,
++  0x00, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++  0x01, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++  0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
++  0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++  0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00,
++  0x07, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++  0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++  0x00, 0x50, 0x61, 0x09, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++  0x00, 0x00, 0x40, 0x09, 0x20, 0x51, 0x0b, 0x00, 0xff, 0x01, 0x00, 0x00,
++  0x9b, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
++  0xa0, 0x00, 0x01, 0x80, 0x00, 0x00, 0x00, 0xb0, 0x98, 0x00, 0x01, 0x40,
++  0x98, 0x00, 0x01, 0x40, 0x02, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
++  0x03, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x17, 0x00, 0x00, 0x00,
++  0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00,
++  0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00,
++  0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++  0x04, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++  0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00,
++  0x05, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00,
++  0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++  0x01, 0x00, 0x00, 0x00, 0x00, 0x50, 0x61, 0x09, 0x02, 0x00, 0x00, 0x00,
++  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x09, 0x20, 0x51, 0x0b, 0x00,
++  0xff, 0x01, 0x00, 0x00, 0x9b, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
++  0x00, 0x00, 0x00, 0x00, 0xb0, 0x00, 0x01, 0x80, 0x00, 0x00, 0x00, 0xc0,
++  0xa8, 0x00, 0x01, 0x40, 0xa8, 0x00, 0x01, 0x40, 0xc4, 0x0b, 0x00, 0x00,
++  0x00, 0x10, 0x00, 0x00, 0xc6, 0x0b, 0x00, 0x00, 0x64, 0xf1, 0x0f, 0x09,
++  0xc7, 0x0b, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xc8, 0x0b, 0x00, 0x00,
++  0xdf, 0x00, 0x00, 0x00, 0xc6, 0x0b, 0x01, 0x00, 0x68, 0xf1, 0x0f, 0x09,
++  0xc7, 0x0b, 0x01, 0x00, 0x00, 0xff, 0xff, 0xff, 0xc8, 0x0b, 0x01, 0x00,
++  0xdf, 0x00, 0x00, 0x00, 0xc9, 0x0b, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++  0xc9, 0x0b, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x62, 0xea, 0x88, 0x00,
++  0x0f, 0x00, 0x00, 0x00, 0x62, 0xea, 0x88, 0x80, 0x0f, 0x00, 0x00, 0x00,
++  0xbe, 0x0b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0x00, 0x00, 0x00,
++  0xa3, 0x0f, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x60, 0xea, 0x0f, 0x00,
++  0x41, 0x00, 0x08, 0x00, 0xa2, 0x0f, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
++  0x60, 0xea, 0x00, 0x00, 0xc8, 0x02, 0x00, 0x00, 0x60, 0xea, 0x01, 0x00,
++  0x06, 0x08, 0x01, 0x00, 0x60, 0xea, 0x02, 0x00, 0x81, 0x08, 0x00, 0x00,
++  0x60, 0xea, 0x03, 0x00, 0xec, 0x08, 0x00, 0x00, 0x60, 0xea, 0x04, 0x00,
++  0x61, 0x08, 0x00, 0x00, 0x60, 0xea, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00,
++  0x60, 0xea, 0x06, 0x00, 0x11, 0x21, 0x13, 0x41, 0x60, 0xea, 0x07, 0x00,
++  0x23, 0x18, 0x00, 0x00, 0x60, 0xea, 0x08, 0x00, 0x31, 0x12, 0x04, 0x05,
++  0x60, 0xea, 0x09, 0x00, 0x26, 0x0f, 0x00, 0x00, 0x60, 0xea, 0x0a, 0x00,
++  0x10, 0x00, 0xc2, 0x00, 0x60, 0xea, 0x0b, 0x00, 0x00, 0x00, 0xc6, 0x00,
++  0x60, 0xea, 0x0c, 0x00, 0x8b, 0xcb, 0x10, 0x00, 0x60, 0xea, 0x0d, 0x00,
++  0x10, 0x27, 0x00, 0x00, 0x60, 0xea, 0x0e, 0x00, 0xc1, 0x00, 0x03, 0x00,
++  0x02, 0x00, 0x00, 0x00, 0xc4, 0x0b, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00,
++  0xca, 0x0b, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++  0x70, 0x17, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00
++};
++unsigned int btfmw_params_b2264stxh418rev1_bin_len = 872;
+diff --git a/board/st/stih418-b2264/config.mk b/board/st/stih418-b2264/config.mk
+new file mode 100644
+index 00000000000..123c9d1be1b
+--- /dev/null
++++ b/board/st/stih418-b2264/config.mk
+@@ -0,0 +1,15 @@
++# SPDX-License-Identifier: GPL-2.0+
++#
++# Author: Alain VOLMAT <avolmat@me.com>
++
++# Add link again libbtfmw library
++#
++
++ifeq ($(CONFIG_SPL_BUILD),y)
++ifneq ($(CONFIG_TARGET_STIH418_B2264_LIBBTFMW_PATH),)
++PLATFORM_LIBS += $(CONFIG_TARGET_STIH418_B2264_LIBBTFMW_PATH)/libbtfmw-h418.a
++
++# libbtfmw is built with hard-float hence we need to remove -msoft-float
++PLATFORM_RELFLAGS := $(filter-out $(call cc-option, -msoft-float), $(PLATFORM_RELFLAGS))
++endif
++endif
+diff --git a/board/st/stih418-b2264/u-boot-spl.lds b/board/st/stih418-b2264/u-boot-spl.lds
+new file mode 100644
+index 00000000000..2247f146e14
+--- /dev/null
++++ b/board/st/stih418-b2264/u-boot-spl.lds
+@@ -0,0 +1,97 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (c) 2004-2008 Texas Instruments
++ *
++ * (C) Copyright 2002
++ * Gary Jennejohn, DENX Software Engineering, <garyj@denx.de>
++ *
++ * (C) Copyright 2022
++ * Chia-Wei Wang <chiawei_wang@aspeedtech.com>
++
++ * (C) Copyright 2024
++ * Alain Volmat <avolmat@me.com>
++ */
++
++MEMORY { .nor : ORIGIN = CONFIG_SPL_TEXT_BASE,
++		LENGTH = CONFIG_SPL_SIZE_LIMIT }
++MEMORY { .bss : ORIGIN = CONFIG_SPL_BSS_START_ADDR,
++		LENGTH = CONFIG_SPL_BSS_MAX_SIZE }
++
++OUTPUT_FORMAT("elf32-littlearm", "elf32-littlearm", "elf32-littlearm")
++OUTPUT_ARCH(arm)
++ENTRY(_start)
++SECTIONS
++{
++	. = 0x00000000;
++
++	. = ALIGN(4);
++	.text :
++	{
++		__image_copy_start = .;
++		*(.vectors)
++		CPUDIR/start.o (.text*)
++		*(.text*)
++		*(.glue*)
++	} > .nor
++
++	. = ALIGN(4);
++	.rodata : { *(SORT_BY_ALIGNMENT(SORT_BY_NAME(.rodata*))) } > .nor
++
++	. = ALIGN(4);
++	.data : {
++		*(.data*)
++	} > .nor
++
++	. = ALIGN(4);
++	__u_boot_list : {
++		KEEP(*(SORT(__u_boot_list*)));
++	} > .nor
++
++	. = ALIGN(4);
++	.binman_sym_table : {
++		__binman_sym_start = .;
++		KEEP(*(SORT(.binman_sym*)));
++		__binman_sym_end = .;
++	} > .nor
++
++	. = ALIGN(4);
++
++	__image_copy_end = .;
++
++	.rel.dyn : {
++		__rel_dyn_start = .;
++		*(.rel*)
++		__rel_dyn_end = .;
++	} > .nor
++
++	.end :
++	{
++		*(.__end)
++	} > .nor
++
++	_image_binary_end = .;
++
++	.bss : {
++		__bss_start = .;
++		*(.bss*)
++		 . = ALIGN(4);
++		__bss_end = .;
++	} > .bss
++
++	__bss_size = __bss_end - __bss_start;
++}
++
++#if defined(IMAGE_MAX_SIZE)
++ASSERT(__image_copy_end - __image_copy_start <= (IMAGE_MAX_SIZE), \
++	"SPL image too big");
++#endif
++
++#if defined(CONFIG_SPL_BSS_MAX_SIZE)
++ASSERT(__bss_end - __bss_start <= (CONFIG_SPL_BSS_MAX_SIZE), \
++	"SPL image BSS too big");
++#endif
++
++#if defined(CONFIG_SPL_MAX_FOOTPRINT)
++ASSERT(__bss_end - _start <= (CONFIG_SPL_MAX_FOOTPRINT), \
++	"SPL image plus BSS too big");
++#endif
+diff --git a/include/configs/stih418-b2264.h b/include/configs/stih418-b2264.h
+new file mode 100644
+index 00000000000..99163d38d64
+--- /dev/null
++++ b/include/configs/stih418-b2264.h
+@@ -0,0 +1,61 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Author(s): Alain Volmat <avolmat@me.com>
++ * Based on stih410-b2260.h file
++ */
++
++#ifndef __CONFIG_H
++#define __CONFIG_H
++
++#include <linux/sizes.h>
++
++/* ram memory-related information */
++#define PHYS_SDRAM_1			0x40000000
++#define CFG_SYS_SDRAM_BASE		PHYS_SDRAM_1
++#define PHYS_SDRAM_1_SIZE		0x80000000
++
++#ifdef CONFIG_SPL_BUILD
++#define SRAM_BASE_ADDR			0x6000000
++#define SRAM_SIZE			0x98000
++#define CFG_SYS_INIT_RAM_ADDR	SRAM_BASE_ADDR
++#define CFG_SYS_INIT_RAM_SIZE	0x10000
++#else
++#define CFG_SYS_INIT_RAM_ADDR	PHYS_SDRAM_1
++#define CFG_SYS_INIT_RAM_SIZE	(PHYS_SDRAM_1_SIZE / 2)
++#endif
++
++#define CFG_SYS_HZ_CLOCK		750000000	/* 750 MHz */
++
++#ifdef CONFIG_SPL_BUILD
++#define CFG_MALLOC_F_ADDR		PHYS_SDRAM_1
++#endif
++
++/* Environment */
++
++/*
++ * For booting Linux, use the first 256 MB of memory, since this is
++ * the maximum mapped by the Linux kernel during initialization.
++ */
++#define CFG_SYS_BOOTMAPSZ		SZ_256M
++
++#define BOOT_TARGET_DEVICES(func) \
++	func(MMC, mmc, 0) \
++	func(USB, usb, 0) \
++	func(DHCP, dhcp, na)
++#include <config_distro_bootcmd.h>
++#define CFG_EXTRA_ENV_SETTINGS				\
++			"kernel_addr_r=0x40000000\0"		\
++			"fdtfile=stih418-b2264.dtb\0"		\
++			"fdt_addr_r=0x47000000\0"		\
++			"scriptaddr=0x50000000\0"		\
++			"pxefile_addr_r=0x50100000\0"		\
++			"ramdisk_addr_r=0x48000000\0"		\
++			BOOTENV
++
++/* Extra Commands */
++
++/* USB Configs */
++
++/* NET Configs */
++
++#endif /* __CONFIG_H */
+-- 
+2.43.0
+
+From 4defcd9502867dee1cc95ccfe6916ba9c4cec4dc Mon Sep 17 00:00:00 2001
+From: Alain Volmat <avolmat@me.com>
+Date: Tue, 23 Jan 2024 20:15:15 +0000
+Subject: [PATCH 06/20] ARM: dts: sti: add stih418-b2264.dts
+
+Add B2264 (4KOpen) device-tree files, copied from linux v6.6
+with only modification being removal of the spifsm node which
+is not present in the stih407-family.dtsi in u-boot, leading
+to dtb build error.
+
+Signed-off-by: Alain Volmat <avolmat@me.com>
+---
+ arch/arm/dts/stih418-b2264.dts | 147 +++++++++++++++++++++++++++++++++
+ 1 file changed, 147 insertions(+)
+ create mode 100644 arch/arm/dts/stih418-b2264.dts
+
+diff --git a/arch/arm/dts/stih418-b2264.dts b/arch/arm/dts/stih418-b2264.dts
+new file mode 100644
+index 00000000000..c2af01f6e5a
+--- /dev/null
++++ b/arch/arm/dts/stih418-b2264.dts
+@@ -0,0 +1,147 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (C) 2021 STMicroelectronics
++ * Author: Alain Volmat <avolmat@me.com>
++ */
++/dts-v1/;
++#include "stih418.dtsi"
++#include <dt-bindings/gpio/gpio.h>
++/ {
++	model = "STiH418 B2264";
++	compatible = "st,stih418-b2264", "st,stih418";
++
++	chosen {
++		stdout-path = &sbc_serial0;
++	};
++
++	memory@40000000 {
++		device_type = "memory";
++		reg = <0x40000000 0xc0000000>;
++	};
++
++	cpus {
++		cpu@0 {
++			operating-points-v2 = <&cpu_opp_table>;
++			/* u-boot puts hpen in SBC dmem at 0xb8 offset */
++			cpu-release-addr = <0x94100b8>;
++		};
++		cpu@1 {
++			operating-points-v2 = <&cpu_opp_table>;
++			/* u-boot puts hpen in SBC dmem at 0xb8 offset */
++			cpu-release-addr = <0x94100b8>;
++		};
++		cpu@2 {
++			operating-points-v2 = <&cpu_opp_table>;
++			/* u-boot puts hpen in SBC dmem at 0xb8 offset */
++			cpu-release-addr = <0x94100b8>;
++		};
++		cpu@3 {
++			operating-points-v2 = <&cpu_opp_table>;
++			/* u-boot puts hpen in SBC dmem at 0xb8 offset */
++			cpu-release-addr = <0x94100b8>;
++		};
++	};
++
++	cpu_opp_table: opp-table {
++		compatible = "operating-points-v2";
++		opp-shared;
++
++		opp00 {
++			opp-hz = /bits/ 64 <300000000>;
++			opp-microvolt = <784000>;
++		};
++		opp01 {
++			opp-hz = /bits/ 64 <500000000>;
++			opp-microvolt = <784000>;
++		};
++		opp02 {
++			opp-hz = /bits/ 64 <800000000>;
++			opp-microvolt = <784000>;
++		};
++		opp03 {
++			opp-hz = /bits/ 64 <1200000000>;
++			opp-microvolt = <784000>;
++		};
++		opp04 {
++			opp-hz = /bits/ 64 <1500000000>;
++			opp-microvolt = <784000>;
++		};
++	};
++
++	aliases {
++		ttyAS0 = &sbc_serial0;
++		ethernet0 = &ethernet0;
++	};
++
++	soc {
++		leds {
++			compatible = "gpio-leds";
++			led-green {
++				gpios = <&pio1 3 GPIO_ACTIVE_HIGH>;
++				default-state = "off";
++			};
++		};
++
++		pin-controller-sbc@961f080 {
++			gmac1 {
++				rgmii1-0 {
++					st,pins {
++						rxd0 = <&pio1 4 ALT1 IN DE_IO 300 CLK_A>;
++						rxd1 = <&pio1 5 ALT1 IN DE_IO 300 CLK_A>;
++						rxd2 = <&pio1 6 ALT1 IN DE_IO 300 CLK_A>;
++						rxd3 = <&pio1 7 ALT1 IN DE_IO 300 CLK_A>;
++						rxdv = <&pio2 0 ALT1 IN DE_IO 300 CLK_A>;
++					};
++				};
++			};
++		};
++
++	};
++};
++
++&ehci0 {
++	status = "okay";
++};
++
++&ethernet0 {
++	phy-mode = "rgmii";
++	pinctrl-0 = <&pinctrl_rgmii1 &pinctrl_rgmii1_mdio_1>;
++	st,tx-retime-src = "clkgen";
++
++	snps,reset-gpio = <&pio0 7 0>;
++	snps,reset-active-low;
++	snps,reset-delays-us = <0 10000 1000000>;
++
++	status = "okay";
++};
++
++&miphy28lp_phy {
++	phy_port0: port@9b22000 {
++		st,sata-gen = <2>; /* SATA GEN3 */
++		st,osc-rdy;
++	};
++};
++
++&mmc0 {
++	status = "okay";
++};
++
++&ohci1 {
++	status = "okay";
++};
++
++&pwm1 {
++	status = "okay";
++};
++
++&sata0 {
++	status = "okay";
++};
++
++&sbc_serial0 {
++	status = "okay";
++};
++
++&st_dwc3 {
++	status = "okay";
++};
+-- 
+2.43.0
+
+From 81a197ea240c6adf27bb778c0909c511ae36939d Mon Sep 17 00:00:00 2001
+From: Alain Volmat <avolmat@me.com>
+Date: Tue, 23 Jan 2024 20:16:42 +0000
+Subject: [PATCH 07/20] ARM: dts: sti: add stih418-b2264-u-boot.dtsi file
+
+Add the u-boot suffixed dtsi file for the stih418-b2264 board.
+
+Signed-off-by: Alain Volmat <avolmat@me.com>
+---
+ arch/arm/dts/stih418-b2264-u-boot.dtsi | 63 ++++++++++++++++++++++++++
+ 1 file changed, 63 insertions(+)
+ create mode 100644 arch/arm/dts/stih418-b2264-u-boot.dtsi
+
+diff --git a/arch/arm/dts/stih418-b2264-u-boot.dtsi b/arch/arm/dts/stih418-b2264-u-boot.dtsi
+new file mode 100644
+index 00000000000..03042d36a35
+--- /dev/null
++++ b/arch/arm/dts/stih418-b2264-u-boot.dtsi
+@@ -0,0 +1,63 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Author(s): Alain Volmat, <avolmat@me.com>
++ *
++ */
++
++/ {
++	clk-sysin {
++		bootph-all;
++	};
++
++	timer@8760200 {
++		bootph-all;
++	};
++
++	soc {
++		bootph-all;
++		syscfg_flash: flash-syscfg@92a0000 {
++			bootph-all;
++		};
++		pin-controller-flash@923f080 {
++			bootph-all;
++			pio40: gpio@9230000 {
++				bootph-all;
++			};
++			pio41: gpio@9231000 {
++				bootph-all;
++			};
++			mmc0 {
++				bootph-all;
++				pinctrl_mmc0: mmc0-0 {
++					bootph-all;
++					st,pins {
++						bootph-all;
++					};
++				};
++			};
++		};
++	};
++};
++
++&dwc3 {
++	phys = <&usb2_picophy0>;
++};
++
++&ehci0 {
++	compatible = "generic-ehci";
++};
++
++&mmc0 {
++	/delete-property/ assigned-clocks;
++	/delete-property/ assigned-clock-parents;
++	/delete-property/ assigned-clock-rates;
++	bootph-all;
++};
++
++&ohci1 {
++	compatible = "generic-ohci";
++};
++
++&sbc_serial0 {
++	bootph-all;
++};
+-- 
+2.43.0
+
+From 1877997d4387f93db896f3ad4f4ed1fbf3633635 Mon Sep 17 00:00:00 2001
+From: Alain Volmat <avolmat@me.com>
+Date: Fri, 11 Aug 2023 19:28:11 +0000
+Subject: [PATCH 08/20] configs: add stih418-b2264 defconfig file
+
+Addition of a defconfig for the stih418-b2264 board.
+
+Signed-off-by: Alain Volmat <avolmat@me.com>
+---
+ configs/stih418-b2264_defconfig | 99 +++++++++++++++++++++++++++++++++
+ 1 file changed, 99 insertions(+)
+ create mode 100644 configs/stih418-b2264_defconfig
+
+diff --git a/configs/stih418-b2264_defconfig b/configs/stih418-b2264_defconfig
+new file mode 100644
+index 00000000000..eddafbd40ac
+--- /dev/null
++++ b/configs/stih418-b2264_defconfig
+@@ -0,0 +1,99 @@
++CONFIG_ARM=y
++CONFIG_SKIP_LOWLEVEL_INIT=y
++# CONFIG_SPL_USE_ARCH_MEMCPY is not set
++# CONFIG_SPL_USE_ARCH_MEMSET is not set
++CONFIG_ARCH_STI=y
++CONFIG_TEXT_BASE=0x60000000
++CONFIG_SYS_MALLOC_LEN=0x18000000
++CONFIG_SYS_MALLOC_F_LEN=0x400000
++CONFIG_NR_DRAM_BANKS=1
++CONFIG_SPL_LDSCRIPT="board/st/stih418-b2264/u-boot-spl.lds"
++CONFIG_ENV_SIZE=0x4000
++CONFIG_DEFAULT_DEVICE_TREE="stih418-b2264"
++CONFIG_OF_LIBFDT_OVERLAY=y
++CONFIG_MULTI_DTB_FIT_UNCOMPRESS_SZ=0x4000
++CONFIG_SPL_MMC=y
++CONFIG_SPL_SYS_MALLOC_F_LEN=0x100000
++CONFIG_SPL_SIZE_LIMIT=0x1000000
++CONFIG_TARGET_STIH418_B2264=y
++CONFIG_IDENT_STRING="STMicroelectronics STiH418-B2264"
++CONFIG_SPL_FS_FAT=y
++# CONFIG_SPL_LIBDISK_SUPPORT is not set
++CONFIG_SYS_LOAD_ADDR=0x80000000
++CONFIG_ANDROID_BOOT_IMAGE=y
++CONFIG_FIT=y
++CONFIG_FIT_VERBOSE=y
++CONFIG_SPL_FIT_PRINT=y
++CONFIG_SPL_FIT_FULL_CHECK=y
++CONFIG_SPL_LOAD_FIT=y
++CONFIG_SPL_LOAD_FIT_ADDRESS=0x80000000
++CONFIG_DISTRO_DEFAULTS=y
++CONFIG_USE_BOOTARGS=y
++CONFIG_BOOTARGS="console=ttyAS1,115200 CONSOLE=/dev/ttyAS1 consoleblank=0 root=/dev/mmcblk0p2 rootfstype=ext4 rw rootwait mem=992M@0x40000000 vmalloc=256m"
++# CONFIG_DISPLAY_CPUINFO is not set
++CONFIG_LAST_STAGE_INIT=y
++CONFIG_STACKPROTECTOR=y
++CONFIG_SPL_STACKPROTECTOR=y
++CONFIG_SPL_HAS_BSS_LINKER_SECTION=y
++CONFIG_SPL_BSS_START_ADDR=0x6010000
++CONFIG_SPL_BSS_MAX_SIZE=0x2000
++CONFIG_SPL_SHOW_ERRORS=y
++CONFIG_SPL_SYS_MALLOC_SIMPLE=y
++CONFIG_SPL_SEPARATE_BSS=y
++CONFIG_SPL_SYS_MALLOC=y
++CONFIG_SPL_SYS_MALLOC_SIZE=0x84000
++# CONFIG_SPL_DISPLAY_PRINT is not set
++CONFIG_SPL_FS_LOAD_PAYLOAD_NAME="u-boot.img"
++CONFIG_SPL_DM_RESET=y
++CONFIG_SPL_YMODEM_SUPPORT=y
++CONFIG_SYS_PROMPT="stih418-b2264 => "
++CONFIG_SYS_PBSIZE=1058
++CONFIG_SYS_BOOTM_LEN=0x1000000
++CONFIG_CMD_ASKENV=y
++CONFIG_CMD_GPT=y
++CONFIG_CMD_MMC=y
++CONFIG_CMD_USB=y
++CONFIG_CMD_TIME=y
++CONFIG_CMD_TIMER=y
++CONFIG_CMD_EXT4_WRITE=y
++# CONFIG_ISO_PARTITION is not set
++CONFIG_OF_CONTROL=y
++CONFIG_OF_EMBED=y
++CONFIG_SYS_RELOC_GD_ENV_ADDR=y
++CONFIG_USE_BOOTFILE=y
++CONFIG_BOOTFILE="uImage"
++CONFIG_DM_STATS=y
++CONFIG_REGMAP=y
++CONFIG_SYSCON=y
++CONFIG_CLK=y
++CONFIG_MISC=y
++CONFIG_MMC_SDHCI=y
++CONFIG_MMC_SDHCI_STI=y
++CONFIG_PHY=y
++CONFIG_STI_USB_PHY=y
++CONFIG_PINCTRL=y
++CONFIG_STI_RESET=y
++CONFIG_STI_ASC_SERIAL=y
++CONFIG_SYSRESET=y
++CONFIG_TIMER=y
++CONFIG_SPL_TIMER=y
++CONFIG_USB=y
++CONFIG_USB_XHCI_HCD=y
++CONFIG_USB_XHCI_DWC3=y
++CONFIG_USB_EHCI_HCD=y
++CONFIG_USB_EHCI_GENERIC=y
++CONFIG_USB_OHCI_HCD=y
++CONFIG_USB_OHCI_GENERIC=y
++CONFIG_USB_DWC3=y
++CONFIG_USB_HOST_ETHER=y
++CONFIG_USB_ETHER_ASIX=y
++CONFIG_USB_ETHER_MCS7830=y
++CONFIG_USB_ETHER_SMSC95XX=y
++CONFIG_USB_GADGET=y
++CONFIG_USB_GADGET_MANUFACTURER="STMicroelectronics"
++CONFIG_USB_GADGET_VENDOR_NUM=0x483
++CONFIG_USB_GADGET_PRODUCT_NUM=0x7270
++CONFIG_USB_GADGET_DOWNLOAD=y
++CONFIG_FAT_WRITE=y
++CONFIG_SPL_TINY_MEMSET=y
++# CONFIG_EFI_LOADER is not set
+-- 
+2.43.0
+
+From f8ccc8f5007addef54a4c7d0350b734dcbff288e Mon Sep 17 00:00:00 2001
+From: Alain Volmat <avolmat@me.com>
+Date: Sat, 3 Feb 2024 20:05:09 +0000
+Subject: [PATCH 09/20] stih418: Add a README.stih418
+
+Gives some intruction on how to build U-boot SPL / U-boot for stih418
+
+Signed-off-by: Alain Volmat <avolmat@me.com>
+---
+ README.stih418 | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+ create mode 100644 README.stih418
+
+diff --git a/README.stih418 b/README.stih418
+new file mode 100644
+index 00000000000..5fe97832109
+--- /dev/null
++++ b/README.stih418
+@@ -0,0 +1,24 @@
++Instruction in order to build for the stih418-b2264 platform
++
++Preparation of the libbtfmw-h418.a file
++---------------------------------------
++U-boot SPL requires to have a valid libbtfmw-h418.a file available.  Indeed
++the libbtfmw is in charge of the early platform preparation.
++This is part of the targetpack-20160812-3 tarball which can be found within
++the starkl delivery available at https://bitbucket.org/4kopen/starkl/get/v1.0.3.tar.bz2
++
++Before being able to use the libbtfmw-h418.a, due to a duplicated symbol
++(div64_u64) available in both u-boot and libbtfmw, it is necessary to run the
++following command in order to rename the symbol available within libbtfmw
++
++objcopy --redefine-sym div64_u64=libbtfwm_div64_u64 libbtfmw-h418.a
++
++1. make stih418-b2264_defconfig
++2. within the make menuconfig, set the TARGET_STIH418_B2264_LIBBTFMW_PATH parameter to the folder containing the libbtfmw-h418.a file
++3. build u-boot spl and u-boot:
++   ARCH=arm CROSS_COMPILE="ccache /usr/bin/arm-linux-gnueabihf-" make all
++4. upon build, 2 binaries are available:
++   u-boot/spl/u-boot-spl.bin: U-boot SPL, to be placed at the beginning of the NOR flash on the 4KOpen card
++   u-boot/u-boot.img: a FIT image of U-boot, which will be loaded by the SPL.
++
++By default (with the stih418-b2264_defconfig provided), the U-boot SPL will look for the u-boot.img file into the 1st primary of the SD card which should be formatted as FAT
+-- 
+2.43.0
+
+From 7bd06f68e42bf32d28baa81355c1de3c0bcb4539 Mon Sep 17 00:00:00 2001
+From: Jerome Audu <jau@free.fr>
+Date: Thu, 8 Feb 2024 22:06:28 +0100
+Subject: [PATCH 10/20] board: st: stih418-b2264: support PL310 / L2$
+
+---
+ include/configs/stih418-b2264.h | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/include/configs/stih418-b2264.h b/include/configs/stih418-b2264.h
+index 99163d38d64..ff8782e769d 100644
+--- a/include/configs/stih418-b2264.h
++++ b/include/configs/stih418-b2264.h
+@@ -14,6 +14,9 @@
+ #define CFG_SYS_SDRAM_BASE		PHYS_SDRAM_1
+ #define PHYS_SDRAM_1_SIZE		0x80000000
+ 
++/* FIXME: This should be loaded from device tree... */
++#define CFG_SYS_PL310_BASE		0x08762000
++
+ #ifdef CONFIG_SPL_BUILD
+ #define SRAM_BASE_ADDR			0x6000000
+ #define SRAM_SIZE			0x98000
+-- 
+2.43.0
+
+From f7c777032d7600024de95e5de8eac6b7b43fcc8e Mon Sep 17 00:00:00 2001
+From: Jerome Audu <jau@free.fr>
+Date: Thu, 8 Feb 2024 22:06:36 +0100
+Subject: [PATCH 11/20] configs: stih418-b2264: enable PL310 / L2$
+
+---
+ configs/stih418-b2264_defconfig | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/configs/stih418-b2264_defconfig b/configs/stih418-b2264_defconfig
+index eddafbd40ac..a285617e26a 100644
+--- a/configs/stih418-b2264_defconfig
++++ b/configs/stih418-b2264_defconfig
+@@ -1,5 +1,7 @@
+ CONFIG_ARM=y
+ CONFIG_SKIP_LOWLEVEL_INIT=y
++CONFIG_SYS_L2_PL310=y
++CONFIG_SPL_SYS_L2_PL310=y
+ # CONFIG_SPL_USE_ARCH_MEMCPY is not set
+ # CONFIG_SPL_USE_ARCH_MEMSET is not set
+ CONFIG_ARCH_STI=y
+-- 
+2.43.0
+
+From 681094e09fb3c6fb742a26421134a3d2c41c54d7 Mon Sep 17 00:00:00 2001
+From: Jerome Audu <jau@free.fr>
+Date: Thu, 8 Feb 2024 22:07:23 +0100
+Subject: [PATCH 12/20] configs: stih418-b2264: save uboot environment in FAT /
+ mmc 0:1
+
+usage:
+  make u-boot-initial-env
+  mkenvimage -s 0x4000 -o uboot.env u-boot-initial-env
+
+  then copy "uboot.env" in FAT / mmc 0:1
+---
+ configs/stih418-b2264_defconfig | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/configs/stih418-b2264_defconfig b/configs/stih418-b2264_defconfig
+index a285617e26a..44f79a1481a 100644
+--- a/configs/stih418-b2264_defconfig
++++ b/configs/stih418-b2264_defconfig
+@@ -61,6 +61,9 @@ CONFIG_CMD_EXT4_WRITE=y
+ # CONFIG_ISO_PARTITION is not set
+ CONFIG_OF_CONTROL=y
+ CONFIG_OF_EMBED=y
++CONFIG_ENV_IS_NOWHERE=y
++CONFIG_ENV_IS_IN_FAT=y
++CONFIG_ENV_FAT_DEVICE_AND_PART="0:1"
+ CONFIG_SYS_RELOC_GD_ENV_ADDR=y
+ CONFIG_USE_BOOTFILE=y
+ CONFIG_BOOTFILE="uImage"
+@@ -96,6 +99,5 @@ CONFIG_USB_GADGET_MANUFACTURER="STMicroelectronics"
+ CONFIG_USB_GADGET_VENDOR_NUM=0x483
+ CONFIG_USB_GADGET_PRODUCT_NUM=0x7270
+ CONFIG_USB_GADGET_DOWNLOAD=y
+-CONFIG_FAT_WRITE=y
+ CONFIG_SPL_TINY_MEMSET=y
+ # CONFIG_EFI_LOADER is not set
+-- 
+2.43.0
+
+From 3bfce51bc3e41ac0d6f22566e4016d6364fd6965 Mon Sep 17 00:00:00 2001
+From: Jerome Audu <jau@free.fr>
+Date: Thu, 8 Feb 2024 22:11:43 +0100
+Subject: [PATCH 13/20] configs: stih418-b2264: Increase SYS_BOOTM_LEN (16Mo ->
+ 48Mo)
+
+Support gzip compressed Image up to 48M
+
+This is mandatory for my starkl Image which
+is ~34Mo and use bootm to start generated FIT
+
+Here log with FIT of ~34Mo when SYS_BOOTM_LEN=16Mo
+----8<------8<------8<------8<----
+(...)
+Uncompressing Kernel Image to 82008000
+Error: inflate() returned -5
+gzip compressed: uncompress error -1
+----8<------8<------8<------8<----
+---
+ configs/stih418-b2264_defconfig | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/configs/stih418-b2264_defconfig b/configs/stih418-b2264_defconfig
+index 44f79a1481a..51d5c6bb93d 100644
+--- a/configs/stih418-b2264_defconfig
++++ b/configs/stih418-b2264_defconfig
+@@ -50,7 +50,7 @@ CONFIG_SPL_DM_RESET=y
+ CONFIG_SPL_YMODEM_SUPPORT=y
+ CONFIG_SYS_PROMPT="stih418-b2264 => "
+ CONFIG_SYS_PBSIZE=1058
+-CONFIG_SYS_BOOTM_LEN=0x1000000
++CONFIG_SYS_BOOTM_LEN=0x3000000
+ CONFIG_CMD_ASKENV=y
+ CONFIG_CMD_GPT=y
+ CONFIG_CMD_MMC=y
+-- 
+2.43.0
+
+From 56a60b85ff2b8d83fc5563dc856f6103cebc4a62 Mon Sep 17 00:00:00 2001
+From: Jerome Audu <jau@free.fr>
+Date: Mon, 24 Mar 2025 23:15:44 +0100
+Subject: [PATCH 14/20] fixup! board: st: add stih418-b2264 board entry
+
+dm_usb_gadget_handle_interrupts & read_mpidr => duplicate symbol !!
+
+check:
+4d1589808970 usb: udc: dwc3: Fold board dm_usb_gadget_handle_interrupts() into DWC3 gadget [Marek Vasut]
+483b799b3a7c board: st: Remove <common.h> and add needed includes [Tom Rini]
+---
+ board/st/stih418-b2264/board.c | 17 -----------------
+ 1 file changed, 17 deletions(-)
+
+diff --git a/board/st/stih418-b2264/board.c b/board/st/stih418-b2264/board.c
+index 24011ad3c99..8ee69cd88d7 100644
+--- a/board/st/stih418-b2264/board.c
++++ b/board/st/stih418-b2264/board.c
+@@ -4,7 +4,6 @@
+  * Originaly based on board.c of stih410-b2260
+  */
+ 
+-#include <common.h>
+ #include <cpu_func.h>
+ #include <init.h>
+ #include <asm/cache.h>
+@@ -71,12 +70,6 @@ static struct dwc3_device dwc3_device_data = {
+ 	.index = 0,
+ };
+ 
+-int dm_usb_gadget_handle_interrupts(struct udevice *dev)
+-{
+-	dwc3_uboot_handle_interrupt(dev);
+-	return 0;
+-}
+-
+ int board_usb_init(int index, enum usb_init_type init)
+ {
+ 	int node;
+@@ -103,16 +96,6 @@ int g_dnl_board_usb_cable_connected(void)
+ #endif
+ 
+ #ifdef CONFIG_SPL_BUILD
+-/* Return the id of the core currently running */
+-static inline unsigned long read_mpidr(void)
+-{
+-	unsigned long val;
+-
+-	asm volatile ("mrc p15, 0, %0, c0, c0, 5" : "=r" (val));
+-
+-	return val;
+-}
+-
+ /*
+  * Currently SMP is not supported and moreover only
+  * a single core must run in order to be able to
+-- 
+2.43.0
+
+From da1f1f983aac9bae04dd900f7b2e953b629304d1 Mon Sep 17 00:00:00 2001
+From: Jerome Audu <jau@free.fr>
+Date: Tue, 25 Mar 2025 21:59:15 +0100
+Subject: [PATCH 15/20] fixup! board: st: add stih418-b2264 board entry
+
+based on
+0b96214cb32e board: stih410-b2260: Remove board_usb_init/cleanup() [Patrice Chotard]
+---
+ board/st/stih418-b2264/board.c | 30 ------------------------------
+ 1 file changed, 30 deletions(-)
+
+diff --git a/board/st/stih418-b2264/board.c b/board/st/stih418-b2264/board.c
+index 8ee69cd88d7..f5a4217d379 100644
+--- a/board/st/stih418-b2264/board.c
++++ b/board/st/stih418-b2264/board.c
+@@ -7,13 +7,8 @@
+ #include <cpu_func.h>
+ #include <init.h>
+ #include <asm/cache.h>
+-#include <asm/global_data.h>
+ #include <asm/io.h>
+ #include <asm/spl.h>
+-#include <linux/usb/otg.h>
+-#include <dwc3-sti-glue.h>
+-#include <dwc3-uboot.h>
+-#include <usb.h>
+ 
+ #ifdef CONFIG_SPL_BUILD
+ #include <spl.h>
+@@ -64,31 +59,6 @@ int board_init(void)
+ }
+ 
+ #ifdef CONFIG_USB_DWC3
+-static struct dwc3_device dwc3_device_data = {
+-	.maximum_speed = USB_SPEED_HIGH,
+-	.dr_mode = USB_DR_MODE_PERIPHERAL,
+-	.index = 0,
+-};
+-
+-int board_usb_init(int index, enum usb_init_type init)
+-{
+-	int node;
+-	const void *blob = gd->fdt_blob;
+-
+-	/* find the snps,dwc3 node */
+-	node = fdt_node_offset_by_compatible(blob, -1, "snps,dwc3");
+-
+-	dwc3_device_data.base = fdtdec_get_addr(blob, node, "reg");
+-
+-	return dwc3_uboot_init(&dwc3_device_data);
+-}
+-
+-int board_usb_cleanup(int index, enum usb_init_type init)
+-{
+-	dwc3_uboot_exit(index);
+-	return 0;
+-}
+-
+ int g_dnl_board_usb_cable_connected(void)
+ {
+ 	return 1;
+-- 
+2.43.0
+
+From f8dd01beed65272100f57bea86c1957681748e34 Mon Sep 17 00:00:00 2001
+From: Jerome Audu <jau@free.fr>
+Date: Tue, 25 Mar 2025 22:00:39 +0100
+Subject: [PATCH 16/20] fixup! ARM: dts: sti: add stih418-b2264-u-boot.dtsi
+ file
+
+Wrong interface ! (detected because of "hang" with fake clock)
+---
+ arch/arm/dts/stih418-b2264-u-boot.dtsi | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm/dts/stih418-b2264-u-boot.dtsi b/arch/arm/dts/stih418-b2264-u-boot.dtsi
+index 03042d36a35..06045e83e84 100644
+--- a/arch/arm/dts/stih418-b2264-u-boot.dtsi
++++ b/arch/arm/dts/stih418-b2264-u-boot.dtsi
+@@ -54,7 +54,7 @@
+ 	bootph-all;
+ };
+ 
+-&ohci1 {
++&ohci0 {
+ 	compatible = "generic-ohci";
+ };
+ 
+-- 
+2.43.0
+
+From 5728e92f0b20a2e10bcb5a06803b3caed50e1f51 Mon Sep 17 00:00:00 2001
+From: Jerome Audu <jau@free.fr>
+Date: Tue, 25 Mar 2025 22:02:26 +0100
+Subject: [PATCH 17/20] fixup! ARM: dts: sti: add stih418-b2264-u-boot.dtsi
+ file
+
+USB become Device to support "ums 0 mmc 0"
+---
+ arch/arm/dts/stih418-b2264-u-boot.dtsi | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm/dts/stih418-b2264-u-boot.dtsi b/arch/arm/dts/stih418-b2264-u-boot.dtsi
+index 06045e83e84..3fecc2c916a 100644
+--- a/arch/arm/dts/stih418-b2264-u-boot.dtsi
++++ b/arch/arm/dts/stih418-b2264-u-boot.dtsi
+@@ -40,6 +40,7 @@
+ };
+ 
+ &dwc3 {
++	dr_mode	= "peripheral";
+ 	phys = <&usb2_picophy0>;
+ };
+ 
+-- 
+2.43.0
+
+From 59d0c1990521cbccc320ac49d87a11b7ca0738f7 Mon Sep 17 00:00:00 2001
+From: Jerome Audu <jau@free.fr>
+Date: Tue, 25 Mar 2025 22:04:30 +0100
+Subject: [PATCH 18/20] fixup! ARM: dts: sti: add stih418-b2264-u-boot.dtsi
+ file
+
+based on
+3810cd52cbf4 ARM: dts: sti: Add fixed clock for ehci and ohci nodes in stih410-b2260.dtsi [Patrice Chotard]
+---
+ arch/arm/dts/stih418-b2264-u-boot.dtsi | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/arch/arm/dts/stih418-b2264-u-boot.dtsi b/arch/arm/dts/stih418-b2264-u-boot.dtsi
+index 3fecc2c916a..6085b70180c 100644
+--- a/arch/arm/dts/stih418-b2264-u-boot.dtsi
++++ b/arch/arm/dts/stih418-b2264-u-boot.dtsi
+@@ -18,6 +18,11 @@
+ 		syscfg_flash: flash-syscfg@92a0000 {
+ 			bootph-all;
+ 		};
++		clk_usb: clk-usb {
++			compatible = "fixed-clock";
++			#clock-cells = <0>;
++			clock-frequency = <100000000>;
++		};
+ 		pin-controller-flash@923f080 {
+ 			bootph-all;
+ 			pio40: gpio@9230000 {
+@@ -46,6 +51,7 @@
+ 
+ &ehci0 {
+ 	compatible = "generic-ehci";
++	clocks = <&clk_usb>;
+ };
+ 
+ &mmc0 {
+@@ -57,6 +63,7 @@
+ 
+ &ohci0 {
+ 	compatible = "generic-ohci";
++	clocks = <&clk_usb>;
+ };
+ 
+ &sbc_serial0 {
+-- 
+2.43.0
+
+From ec9ff58468d56b7789710f8eaf66010efddd699b Mon Sep 17 00:00:00 2001
+From: Jerome Audu <jau@free.fr>
+Date: Tue, 25 Mar 2025 22:05:34 +0100
+Subject: [PATCH 19/20] fixup! configs: add stih418-b2264 defconfig file
+
+rebase !
+and follow B2260 rules !
+4096d28ec80f configs: stih410-b2260: Enable CMD_USB_MASS_STORAGE flag [Patrice Chotard]
+d0ff527f6237 configs: stih410-b2260: Enable DM_USB_GADGET flag [Patrice Chotard]
+08fec26a6764 configs: stih410-b2260: Enable USB_DWC3_GENERIC and USB_DWC3_STI flags [Patrice Chotard]
+0f688eb0d69e configs: stih410-b2260: Enable DM_REGULATOR flag [Patrice Chotard]
+---
+ configs/stih418-b2264_defconfig | 21 ++++++++++++++-------
+ 1 file changed, 14 insertions(+), 7 deletions(-)
+
+diff --git a/configs/stih418-b2264_defconfig b/configs/stih418-b2264_defconfig
+index 51d5c6bb93d..b54ad61976c 100644
+--- a/configs/stih418-b2264_defconfig
++++ b/configs/stih418-b2264_defconfig
+@@ -16,12 +16,17 @@ CONFIG_OF_LIBFDT_OVERLAY=y
+ CONFIG_MULTI_DTB_FIT_UNCOMPRESS_SZ=0x4000
+ CONFIG_SPL_MMC=y
+ CONFIG_SPL_SYS_MALLOC_F_LEN=0x100000
++CONFIG_SPL_HAS_BSS_LINKER_SECTION=y
++CONFIG_SPL_BSS_START_ADDR=0x6010000
++CONFIG_SPL_BSS_MAX_SIZE=0x2000
++CONFIG_SYS_BOOTM_LEN=0x3000000
++CONFIG_SYS_LOAD_ADDR=0x80000000
+ CONFIG_SPL_SIZE_LIMIT=0x1000000
+ CONFIG_TARGET_STIH418_B2264=y
+ CONFIG_IDENT_STRING="STMicroelectronics STiH418-B2264"
+ CONFIG_SPL_FS_FAT=y
+ # CONFIG_SPL_LIBDISK_SUPPORT is not set
+-CONFIG_SYS_LOAD_ADDR=0x80000000
++# CONFIG_EFI_LOADER is not set
+ CONFIG_ANDROID_BOOT_IMAGE=y
+ CONFIG_FIT=y
+ CONFIG_FIT_VERBOSE=y
+@@ -32,13 +37,11 @@ CONFIG_SPL_LOAD_FIT_ADDRESS=0x80000000
+ CONFIG_DISTRO_DEFAULTS=y
+ CONFIG_USE_BOOTARGS=y
+ CONFIG_BOOTARGS="console=ttyAS1,115200 CONSOLE=/dev/ttyAS1 consoleblank=0 root=/dev/mmcblk0p2 rootfstype=ext4 rw rootwait mem=992M@0x40000000 vmalloc=256m"
++CONFIG_SYS_PBSIZE=1058
+ # CONFIG_DISPLAY_CPUINFO is not set
+ CONFIG_LAST_STAGE_INIT=y
+ CONFIG_STACKPROTECTOR=y
+ CONFIG_SPL_STACKPROTECTOR=y
+-CONFIG_SPL_HAS_BSS_LINKER_SECTION=y
+-CONFIG_SPL_BSS_START_ADDR=0x6010000
+-CONFIG_SPL_BSS_MAX_SIZE=0x2000
+ CONFIG_SPL_SHOW_ERRORS=y
+ CONFIG_SPL_SYS_MALLOC_SIMPLE=y
+ CONFIG_SPL_SEPARATE_BSS=y
+@@ -49,12 +52,11 @@ CONFIG_SPL_FS_LOAD_PAYLOAD_NAME="u-boot.img"
+ CONFIG_SPL_DM_RESET=y
+ CONFIG_SPL_YMODEM_SUPPORT=y
+ CONFIG_SYS_PROMPT="stih418-b2264 => "
+-CONFIG_SYS_PBSIZE=1058
+-CONFIG_SYS_BOOTM_LEN=0x3000000
+ CONFIG_CMD_ASKENV=y
+ CONFIG_CMD_GPT=y
+ CONFIG_CMD_MMC=y
+ CONFIG_CMD_USB=y
++CONFIG_CMD_USB_MASS_STORAGE=y
+ CONFIG_CMD_TIME=y
+ CONFIG_CMD_TIMER=y
+ CONFIG_CMD_EXT4_WRITE=y
+@@ -77,12 +79,14 @@ CONFIG_MMC_SDHCI_STI=y
+ CONFIG_PHY=y
+ CONFIG_STI_USB_PHY=y
+ CONFIG_PINCTRL=y
++CONFIG_DM_REGULATOR=y
+ CONFIG_STI_RESET=y
+ CONFIG_STI_ASC_SERIAL=y
+ CONFIG_SYSRESET=y
+ CONFIG_TIMER=y
+ CONFIG_SPL_TIMER=y
+ CONFIG_USB=y
++CONFIG_DM_USB_GADGET=y
+ CONFIG_USB_XHCI_HCD=y
+ CONFIG_USB_XHCI_DWC3=y
+ CONFIG_USB_EHCI_HCD=y
+@@ -90,6 +94,8 @@ CONFIG_USB_EHCI_GENERIC=y
+ CONFIG_USB_OHCI_HCD=y
+ CONFIG_USB_OHCI_GENERIC=y
+ CONFIG_USB_DWC3=y
++CONFIG_USB_DWC3_GENERIC=y
++CONFIG_USB_DWC3_STI=y
+ CONFIG_USB_HOST_ETHER=y
+ CONFIG_USB_ETHER_ASIX=y
+ CONFIG_USB_ETHER_MCS7830=y
+@@ -100,4 +106,5 @@ CONFIG_USB_GADGET_VENDOR_NUM=0x483
+ CONFIG_USB_GADGET_PRODUCT_NUM=0x7270
+ CONFIG_USB_GADGET_DOWNLOAD=y
+ CONFIG_SPL_TINY_MEMSET=y
+-# CONFIG_EFI_LOADER is not set
++# CONFIG_TOOLS_LIBCRYPTO is not set
++# CONFIG_TOOLS_KWBIMAGE is not set
+-- 
+2.43.0
+
+From 18dbdd894fcfb741d170c4987e39892746b493e1 Mon Sep 17 00:00:00 2001
+From: Jerome Audu <jau@free.fr>
+Date: Tue, 25 Mar 2025 22:57:36 +0100
+Subject: [PATCH 20/20] fixup! ARM: dts: sti: add stih418-b2264-u-boot.dtsi
+ file
+
+also enable 2nd Host USB2 port
+ - ohci0/ehci0: USB2 bottom
+ - ohci1/ehci1: USB2 top
+---
+ arch/arm/dts/stih418-b2264-u-boot.dtsi | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/arch/arm/dts/stih418-b2264-u-boot.dtsi b/arch/arm/dts/stih418-b2264-u-boot.dtsi
+index 6085b70180c..89e7a8a544b 100644
+--- a/arch/arm/dts/stih418-b2264-u-boot.dtsi
++++ b/arch/arm/dts/stih418-b2264-u-boot.dtsi
+@@ -54,6 +54,11 @@
+ 	clocks = <&clk_usb>;
+ };
+ 
++&ehci1 {
++	compatible = "generic-ehci";
++	clocks = <&clk_usb>;
++};
++
+ &mmc0 {
+ 	/delete-property/ assigned-clocks;
+ 	/delete-property/ assigned-clock-parents;
+@@ -66,6 +71,11 @@
+ 	clocks = <&clk_usb>;
+ };
+ 
++&ohci1 {
++	compatible = "generic-ohci";
++	clocks = <&clk_usb>;
++};
++
+ &sbc_serial0 {
+ 	bootph-all;
+ };
+-- 
+2.43.0
+
