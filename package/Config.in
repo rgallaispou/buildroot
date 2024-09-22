@@ -333,6 +333,7 @@ comment "Graphic applications"
 	source "package/tesseract-ocr/Config.in"
 	source "package/tinifier/Config.in"
 	source "package/wayfire/Config.in"
+	source "package/libdbusmenu-gtk/Config.in"
 	source "package/wmenu/Config.in"
 
 comment "Graphic libraries"
