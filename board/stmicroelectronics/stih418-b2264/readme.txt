@@ -11,7 +11,13 @@ platform:
 How to build
 ============
 
- $ make stih418_b2264_defconfig / make stih418_b2264_ramfs_defconfig
+ stih418_b2264_defconfig: profile with weston
+ stih418_b2264_ramfs_defconfig: profile with weston (using ramfs)
+ stih418_b2264_wayfire_defconfig: profile with wayfire
+ stih418_b2264_wayfire_full_defconfig: profile with weston,mpv,doom,supertuxkart
+
+ $ make stih418_b2264_defconfig / make stih418_b2264_ramfs_defconfig /
+        stih418_b2264_wayfire_defconfig / make stih418_b2264_wayfire_full_defconfig
  $ make
 
 How to write the microSD card / USB
@@ -101,6 +107,18 @@ Wayland tips
   # Export these variables
   export WAYLAND_DISPLAY=wayland-1
   export XDG_RUNTIME_DIR=/tmp/101-runtime-dir
+
+ # Start wayvnc in headless mode
+ #-------------------------------
+ By default, "wayvnc" server expose what it displayed on HDMI-A-1
+
+ If you don't want to plug an HDMI cable, just setup it in headless mode
+
+  # Export these variables
+  export WLR_BACKENDS=headless
+  export WLR_LIBINPUT_NO_DEVICES=1
+  export WAYLAND_DISPLAY=wayland-1
+  wayvnc -g 0.0.0.0
 
 Audio tips
 ==========
