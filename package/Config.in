@@ -338,6 +338,7 @@ comment "Graphic applications"
 	source "package/gtk-layer-shell/Config.in"
 	source "package/wf-shell/Config.in"
 	source "package/wcm/Config.in"
+	source "package/alacritty/Config.in"
 	source "package/wmenu/Config.in"
 
 comment "Graphic libraries"

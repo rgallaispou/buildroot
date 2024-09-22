@@ -1,0 +1,35 @@
+################################################################################
+#
+# alacritty
+#
+################################################################################
+
+ALACRITTY_VERSION = 0.16.1
+ALACRITTY_SITE = $(call github,alacritty,alacritty,v$(ALACRITTY_VERSION))
+ALACRITTY_LICENSE = MIT
+ALACRITTY_LICENSE_FILES = LICENSE-MIT
+ALACRITTY_DEPENDENCIES = wayland wayland-protocols libxkbcommon freetype fontconfig
+
+ALACRITTY_SUBDIR = alacritty
+ALACRITTY_CARGO_BUILD_OPTS = --no-default-features --features=wayland
+ALACRITTY_CARGO_INSTALL_OPTS = --no-default-features --features=wayland
+
+# Fonction pour installer les fichiers additionnels (Desktop et Icône)
+define ALACRITTY_INSTALL_ADDITIONAL_FILES
+	# Création des répertoires de destination s'ils n'existent pas
+	$(INSTALL) -d -m 0755 $(TARGET_DIR)/usr/share/applications
+	$(INSTALL) -d -m 0755 $(TARGET_DIR)/usr/share/pixmaps
+
+	# Copie du fichier .desktop
+	$(INSTALL) -D -m 0644 $(@D)/extra/linux/Alacritty.desktop \
+		$(TARGET_DIR)/usr/share/applications/Alacritty.desktop
+
+	# Copie et renommage de l'icône SVG
+	$(INSTALL) -D -m 0644 $(@D)/extra/logo/alacritty-term.svg \
+		$(TARGET_DIR)/usr/share/pixmaps/Alacritty.svg
+endef
+
+# On attache la fonction à l'étape de post-installation sur la cible
+ALACRITTY_POST_INSTALL_TARGET_HOOKS += ALACRITTY_INSTALL_ADDITIONAL_FILES
+
+$(eval $(cargo-package))
