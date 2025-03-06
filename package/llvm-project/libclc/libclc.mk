@@ -44,5 +44,8 @@ LIBCLC_CONF_OPTS = \
 HOST_LIBCLC_CONF_OPTS = \
 	-DLIBCLC_TARGETS_TO_BUILD=spirv64-mesa3d-
 
+HOST_LIBCLC_CONF_OPTS = \
+	-DLIBCLC_TARGETS_TO_BUILD=spirv64-mesa3d-
+
 $(eval $(cmake-package))
 $(eval $(host-cmake-package))
