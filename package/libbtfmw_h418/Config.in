@@ -1,0 +1,4 @@
+config BR2_PACKAGE_LIBBTFMW_H418
+    bool "libbtfmw-h418"
+    help
+      This package extracts the libbtfmw-h418.a file from a nested archive.
