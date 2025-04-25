@@ -1,0 +1,6 @@
+config BR2_PACKAGE_YYJSON
+	bool "yyjson"
+	help
+	  yyjson is a high-performance JSON library written in C.
+
+	  https://github.com/ibireme/yyjson
