@@ -4,7 +4,7 @@
 #
 ################################################################################
 
-PIGLIT_VERSION = 2affee53f3ad7a96f5b397a2b6d6408af8a374b0
+PIGLIT_VERSION = a70c33045c59310f972dbbdb33f322eb209971bc
 PIGLIT_SITE = https://gitlab.freedesktop.org/mesa/piglit.git
 PIGLIT_SITE_METHOD = git
 PIGLIT_LICENSE = MIT (code), \
@@ -23,6 +23,7 @@ PIGLIT_DEPENDENCIES = host-pkgconf \
 	python-mako \
 	python-numpy \
 	python-six \
+	vulkan-loader \
 	waffle \
 	zlib
 
