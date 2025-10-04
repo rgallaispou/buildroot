@@ -13,7 +13,8 @@ WAFFLE_LICENSE_FILES = LICENSE.txt
 
 WAFFLE_DEPENDENCIES = host-pkgconf
 
-WAFFLE_CONF_OPTS = -Dbuild-tests=false \
+WAFFLE_CONF_OPTS = -Dbuild.pkg_config_path=$(STAGING_DIR)/usr/lib/pkgconfig \
+	-Dbuild-tests=false \
 	-Dbuild-examples=false \
 	-Dbuild-manpages=false \
 	-Dbuild-htmldocs=false \
