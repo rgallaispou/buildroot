@@ -1,0 +1,8 @@
+config BR2_PACKAGE_OLED_MONITOR
+	bool "oled_monitor"
+	select BR2_PACKAGE_NCURSES
+	help
+	  Lightweight OLED system monitor (CPU/Network).
+	  Version without NetworkManager dependency.
+
+	  Displays CPU usage and basic network info on SSD1307.
