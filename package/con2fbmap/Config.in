@@ -1,0 +1,10 @@
+config BR2_PACKAGE_CON2FBMAP
+	bool "con2fbmap"
+	help
+	  A utility to map virtual consoles to framebuffers.
+	  
+	  Usage: con2fbmap console [framebuffer]
+	  
+	  Useful for embedding graphical applications on specific
+	  framebuffers (like OLED screens) while keeping the console
+	  elsewhere, or mapping the console to the OLED.
