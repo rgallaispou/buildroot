@@ -341,6 +341,7 @@ comment "Graphic applications"
 	source "package/alacritty/Config.in"
 	source "package/aml/Config.in"
 	source "package/neatvnc/Config.in"
+	source "package/wayvnc/Config.in"
 	source "package/wmenu/Config.in"
 
 comment "Graphic libraries"
