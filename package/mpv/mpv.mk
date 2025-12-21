@@ -4,7 +4,7 @@
 #
 ################################################################################
 
-MPV_VERSION = 0.40.0
+MPV_VERSION = 0.41.0
 MPV_SITE = $(call github,mpv-player,mpv,v$(MPV_VERSION))
 MPV_DEPENDENCIES = \
 	host-pkgconf ffmpeg libass libplacebo zlib \
@@ -160,10 +160,10 @@ endif
 # SDL support
 # Sdl2 requires 64-bit sync intrinsics
 ifeq ($(BR2_TOOLCHAIN_HAS_SYNC_8)$(BR2_PACKAGE_SDL2),yy)
-MPV_CONF_OPTS += -Dsdl2=enabled
+MPV_CONF_OPTS += -Dsdl2-video=enabled
 MPV_DEPENDENCIES += sdl2
 else
-MPV_CONF_OPTS += -Dsdl2=disabled
+MPV_CONF_OPTS += -Dsdl2-video=disabled
 endif
 
 # va-api support
