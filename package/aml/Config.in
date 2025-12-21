@@ -1,0 +1,7 @@
+config BR2_PACKAGE_AML
+	bool "aml"
+	help
+	  Andri's Main Loop library. Une bibliothèque de boucle 
+	  d'événements générique utilisée par neatvnc.
+
+	  https://github.com/any1/aml

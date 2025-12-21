@@ -339,6 +339,7 @@ comment "Graphic applications"
 	source "package/wf-shell/Config.in"
 	source "package/wcm/Config.in"
 	source "package/alacritty/Config.in"
+	source "package/aml/Config.in"
 	source "package/wmenu/Config.in"
 
 comment "Graphic libraries"
