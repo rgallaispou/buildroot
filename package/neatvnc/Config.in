@@ -1,0 +1,10 @@
+config BR2_PACKAGE_NEATVNC
+	bool "neatvnc"
+	select BR2_PACKAGE_AML
+	select BR2_PACKAGE_PIXMAN
+	select BR2_PACKAGE_LIBDRM
+	select BR2_PACKAGE_ZLIB
+	help
+	  A TLS-based VNC server library.
+
+	  https://github.com/any1/neatvnc
