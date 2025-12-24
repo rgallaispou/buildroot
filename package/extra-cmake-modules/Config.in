@@ -1,0 +1,7 @@
+config BR2_PACKAGE_EXTRA_CMAKE_MODULES
+	bool "extra-cmake-modules"
+	help
+	  Extra CMake Modules (ECM) contient des modules qui 
+	  fournissent des fonctionnalités supplémentaires à CMake.
+
+	  https://github.com/KDE/extra-cmake-modules
