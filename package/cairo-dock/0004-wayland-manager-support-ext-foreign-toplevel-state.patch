@@ -1,0 +1,58 @@
+From 99c9894e235e676df15cf14e2d07296758fd884d Mon Sep 17 00:00:00 2001
+From: Daniel Kondor <kondor.dani@gmail.com>
+Date: Sun, 23 Nov 2025 19:37:45 +0100
+Subject: [PATCH 4/4] wayland-manager: support ext-foreign-toplevel-state
+
+---
+ .../cairo-dock-wayland-manager.c                | 17 ++++++++++++-----
+ 1 file changed, 12 insertions(+), 5 deletions(-)
+
+diff --git a/src/implementations/cairo-dock-wayland-manager.c b/src/implementations/cairo-dock-wayland-manager.c
+index b5375997..14dcce4f 100644
+--- a/src/implementations/cairo-dock-wayland-manager.c
++++ b/src/implementations/cairo-dock-wayland-manager.c
+@@ -50,6 +50,7 @@
+ #include "cairo-dock-cosmic-toplevel.h"
+ #include "cairo-dock-plasma-virtual-desktop.h"
+ #include "cairo-dock-ext-workspaces.h"
++#include "cairo-dock-ext-toplevel.h"
+ #endif
+ #include "cairo-dock-wayland-wm.h"
+ #include "cairo-dock-wayland-hotspots.h"
+@@ -494,14 +495,19 @@ static void _registry_global_cb ( G_GNUC_UNUSED void *data, struct wl_registry *
+ 	{
+ 		cd_debug("Found plasma-virtual-desktop-manager");
+ 	}
+-	else if (gldi_cosmic_toplevel_match_protocol (id, interface, version))
+-	{
+-		cd_debug("Found cosmic-toplevel-manager");
+-	}
+ 	else if (gldi_ext_workspaces_match_protocol (id, interface, version))
+ 	{
+ 		cd_debug("Found ext-workspace-manager");
+ 	}
++	// note: for now, both cosmic and ext-toplevel use the same protocol (ext-toplevel-list)
++	// so we need to check both
++	else
++	{
++		if (gldi_cosmic_toplevel_match_protocol (id, interface, version))
++			cd_debug ("Found cosmic-toplevel-manager");
++		if (gldi_ext_toplevel_match_protocol (id, interface, version))
++			cd_debug ("Found ext-toplevel-state");
++	}
+ #else
+ 	(void)version; // avoid warning
+ #endif
+@@ -578,7 +584,8 @@ static void init (void)
+ 				cd_warning ("inconsistent compositor types detected!");
+ 			s_CompositorType = WAYLAND_COMPOSITOR_KWIN;
+ 		}
+-		else gldi_wlr_foreign_toplevel_try_init (registry);
++		else if (!gldi_ext_toplevel_try_init (registry))
++			gldi_wlr_foreign_toplevel_try_init (registry);
+ 		if (!gldi_plasma_virtual_desktop_try_init (registry))
+ 			gldi_ext_workspaces_try_init (registry);
+ 	}
+-- 
+2.43.0
+

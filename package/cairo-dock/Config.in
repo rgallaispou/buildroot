@@ -1,0 +1,27 @@
+config BR2_PACKAGE_CAIRO_DOCK
+	bool "cairo-dock"
+	depends on BR2_PACKAGE_HAS_LIBGL
+	depends on BR2_PACKAGE_LIBGTK3
+	select BR2_PACKAGE_LIBCAIRO
+	select BR2_PACKAGE_LIBGLIB2
+	select BR2_PACKAGE_LIBRSVG
+	select BR2_PACKAGE_DBUS
+	select BR2_PACKAGE_LIBGLU
+	select BR2_PACKAGE_LIBCURL
+	select BR2_PACKAGE_DBUS_GLIB
+	select BR2_PACKAGE_WAYLAND
+	select BR2_PACKAGE_WAYLAND_PROTOCOLS
+	select BR2_PACKAGE_LIBXKBCOMMON
+	select BR2_PACKAGE_XLIB_LIBXCOMPOSITE if BR2_PACKAGE_XORG7
+	select BR2_PACKAGE_JSON_C if BR2_PACKAGE_WAYFIRE
+	select BR2_PACKAGE_EXTRA_CMAKE_MODULES
+	select BR2_PACKAGE_GTK_LAYER_SHELL
+	help
+	  Cairo-Dock est une barre de lancement animée.
+	  La version 3.6.x apporte le support natif de Wayland via 
+	  le protocole layer-shell.
+
+	  https://github.com/Cairo-Dock/cairo-dock-core
+
+comment "cairo-dock needs a toolchain w/ GTK3, OpenGL and Wayland"
+	depends on !BR2_PACKAGE_HAS_LIBGL || !BR2_PACKAGE_LIBGTK3 || !BR2_PACKAGE_WAYLAND

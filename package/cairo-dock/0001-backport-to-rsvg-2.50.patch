@@ -1,0 +1,34 @@
+From a1745974617d86603e4f3774de6f2415fce4ce3d Mon Sep 17 00:00:00 2001
+From: Jerome Audu <jerome.audu@st.com>
+Date: Wed, 24 Dec 2025 10:10:10 +0100
+Subject: [PATCH] backport to rsvg 2.50
+
+
+diff --git a/src/implementations/cairo-dock-gauge.c b/src/implementations/cairo-dock-gauge.c
+index 6b09553..a592c24 100644
+--- a/src/implementations/cairo-dock-gauge.c
++++ b/src/implementations/cairo-dock-gauge.c
+@@ -148,16 +148,10 @@ static void __load_needle (GaugeIndicator *pGaugeIndicator, int iWidth, int iHei
+ 	// get the SVG dimensions.
+ 	gdouble W, H;
+ 	int sizeX, sizeY;
+-	if (rsvg_handle_get_intrinsic_size_in_pixels (pSvgHandle, &W, &H))
+-	{
+-		sizeX = (int)ceil (W);
+-		sizeY = (int)ceil (H);
+-	}
+-	else
+-	{
+-		sizeX = 1;
+-		sizeY = 1;
+-	}
++	RsvgDimensionData dimensions;
++	rsvg_handle_get_dimensions(pSvgHandle, &dimensions);
++	sizeX = (dimensions.width ? dimensions.width : 1);
++	sizeY = (dimensions.height ? dimensions.height : 1);
+ 	
+ 	// guess the needle size and offset if not specified.
+ 	if (pGaugeIndicator->iNeedleRealHeight == 0)
+-- 
+2.43.0
+
