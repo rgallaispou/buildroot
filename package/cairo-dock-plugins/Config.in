@@ -1,0 +1,10 @@
+config BR2_PACKAGE_CAIRO_DOCK_PLUGINS
+	bool "cairo-dock-plugins"
+	depends on BR2_PACKAGE_CAIRO_DOCK
+	select BR2_PACKAGE_LIBXML2
+	select BR2_PACKAGE_LIBCURL
+	help
+	  Plugins additionnels pour Cairo-Dock (Météo, Terminal, 
+	  Monitoring, etc.).
+
+	  https://github.com/Cairo-Dock/cairo-dock-plugins

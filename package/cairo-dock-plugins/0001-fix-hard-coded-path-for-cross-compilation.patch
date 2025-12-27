@@ -1,0 +1,25 @@
+From 57a9a3140b72ac01911b4ef584c8844d267cd35f Mon Sep 17 00:00:00 2001
+From: Jerome Audu <jau@free.fr>
+Date: Sat, 27 Dec 2025 22:15:07 +0100
+Subject: [PATCH] fix hard coded path for cross-compilation
+
+---
+ clock/src/CMakeLists.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/clock/src/CMakeLists.txt b/clock/src/CMakeLists.txt
+index 6ec2d3e057aa..19f513289164 100644
+--- a/clock/src/CMakeLists.txt
++++ b/clock/src/CMakeLists.txt
+@@ -34,7 +34,7 @@ endif()
+ 
+ include_directories (
+ 	${PACKAGE_INCLUDE_DIRS}
+-	${LIBICAL_PACKAGE_INCLUDE_DIRS} "/usr/include/libical")
++	${LIBICAL_PACKAGE_INCLUDE_DIRS} "libical")
+ 
+ link_directories (
+ 	${PACKAGE_LIBRARY_DIRS}
+-- 
+2.52.0
+
