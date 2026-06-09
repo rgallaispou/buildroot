@@ -303,6 +303,7 @@ endmenu
 menu "Graphic libraries and applications (graphic/text)"
 
 comment "Graphic applications"
+	source "package/alacritty/Config.in"
 	source "package/cage/Config.in"
 	source "package/cog/Config.in"
 	source "package/drm-info/Config.in"
